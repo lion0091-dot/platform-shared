@@ -120,11 +120,13 @@ export async function sendFcm(
 
     if (res.ok) return { ok: true };
 
-    const err = (await res.json().catch(() => ({}))) as { error?: { status?: string; details?: Array<{ errorCode?: string }> } };
+    const err = (await res.json().catch(() => ({}))) as { error?: { status?: string; details?: Array<{ errorCode?: string; fieldViolations?: Array<{ field?: string }> }> } };
     const code = err.error?.details?.find((d) => d.errorCode)?.errorCode ?? err.error?.status;
+    // INVALID_ARGUMENT 는 토큰이 잘못된 경우뿐 아니라 메시지(본문·데이터·채널)가 잘못된 경우에도 온다. 토큰 필드가 지목됐을 때만 토큰 문제로 본다.
+    const tokenInvalid = res.status === 400 && code === "INVALID_ARGUMENT" && Boolean(err.error?.details?.some((d) => d.fieldViolations?.some((v) => /token/i.test(v.field ?? ""))));
 
-    // 토큰 자체가 쓸 수 없는 경우만 지운다. 일시 장애·권한 문제로 토큰을 지우지 않는다.
-    return { ok: false, gone: res.status === 404 || code === "UNREGISTERED" || (res.status === 400 && code === "INVALID_ARGUMENT") };
+    // 토큰 자체가 쓸 수 없는 경우만 지운다. 일시 장애·권한 문제·메시지 형식 문제로 토큰을 지우지 않는다.
+    return { ok: false, gone: res.status === 404 || code === "UNREGISTERED" || tokenInvalid };
   } catch {
     return { ok: false, gone: false };
   }

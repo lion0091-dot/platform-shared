@@ -83,7 +83,10 @@ describe("sendFcm", () => {
 
     expect(await run(404, { error: { status: "NOT_FOUND" } })).toEqual({ ok: false, gone: true });
     expect(await run(404, { error: { status: "NOT_FOUND", details: [{ errorCode: "UNREGISTERED" }] } })).toEqual({ ok: false, gone: true });
-    expect(await run(400, { error: { status: "INVALID_ARGUMENT" } })).toEqual({ ok: false, gone: true });
+    // 400 INVALID_ARGUMENT: 토큰 필드가 지목됐을 때만 지운다(메시지가 잘못된 경우 모든 기기를 지우면 안 된다)
+    expect(await run(400, { error: { status: "INVALID_ARGUMENT", details: [{ fieldViolations: [{ field: "message.token" }] }] } })).toEqual({ ok: false, gone: true });
+    expect(await run(400, { error: { status: "INVALID_ARGUMENT" } })).toEqual({ ok: false, gone: false });
+    expect(await run(400, { error: { status: "INVALID_ARGUMENT", details: [{ fieldViolations: [{ field: "message.data" }] }] } })).toEqual({ ok: false, gone: false });
     expect(await run(500, { error: { status: "INTERNAL" } })).toEqual({ ok: false, gone: false });
     expect(await run(403, { error: { status: "PERMISSION_DENIED" } })).toEqual({ ok: false, gone: false });
     expect(await run(429, { error: { status: "QUOTA_EXCEEDED" } })).toEqual({ ok: false, gone: false });
