@@ -1,0 +1,447 @@
+{
+  "_doc": "docs/contract/integration-contract.md 부록. 가짜 비밀·고정 시각 시험 벡터. 서명 = HMAC-SHA256(본문 원문 문자열 그대로, 비밀) hex 소문자.",
+  "now": 1800000000,
+  "secrets_TEST_ONLY": {
+    "SSO_WHOLESALE": "TEST-ONLY-sso-wholesale-0123456789abcdef",
+    "SSO_SHIPPING": "TEST-ONLY-sso-shipping-0123456789abcdef",
+    "SUSPEND_WHOLESALE": "TEST-ONLY-suspend-wholesale-0123456789abcd",
+    "SERVER_SHIPPING": "TEST-ONLY-server-shipping-0123456789abcde",
+    "HOLDS_WHOLESALE": "TEST-ONLY-holds-wholesale-0123456789abcdef"
+  },
+  "constants": {
+    "U1": "11111111-1111-4111-8111-111111111111",
+    "U2": "22222222-2222-4222-8222-222222222222",
+    "T1": "33333333-3333-4333-8333-333333333333"
+  },
+  "sso_tokens": [
+    {
+      "id": "sso-w-ok-owner",
+      "system": "wholesale",
+      "secretKey": "SSO_WHOLESALE",
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ3aG9sZXNhbGUiLCJhdWQiOiJhY2NvdW50IiwiZXh0X3VzZXIiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJleHRfdGVuYW50IjoiMzMzMzMzMzMtMzMzMy00MzMzLTgzMzMtMzMzMzMzMzMzMzMzIiwicm9sZSI6Im93bmVyIiwibmFtZSI6IuqwgOuCmOuLpOyDgeyCrCIsImp0aSI6InNzby1qdGktMDAwMSIsImlhdCI6MTgwMDAwMDAwMCwiZXhwIjoxODAwMDAwMDYwfQ.g7fKU6mJlWb2cdxN1hPAlFyeiMRMuk2QWqRpNvuFdBE",
+      "expect": {
+        "ok": true,
+        "claims": {
+          "role": "owner",
+          "extUser": "11111111-1111-4111-8111-111111111111",
+          "extTenant": "33333333-3333-4333-8333-333333333333",
+          "jti": "sso-jti-0001",
+          "access": null,
+          "to": "/ledger"
+        }
+      }
+    },
+    {
+      "id": "sso-w-ok-manager-access",
+      "system": "wholesale",
+      "secretKey": "SSO_WHOLESALE",
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ3aG9sZXNhbGUiLCJhdWQiOiJhY2NvdW50IiwiZXh0X3VzZXIiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJleHRfdGVuYW50IjoiMzMzMzMzMzMtMzMzMy00MzMzLTgzMzMtMzMzMzMzMzMzMzMzIiwicm9sZSI6Im1hbmFnZXIiLCJuYW1lIjoi6rCA64KY64uk7IOB7IKsIiwianRpIjoic3NvLWp0aS0wMDAyIiwiaWF0IjoxODAwMDAwMDAwLCJleHAiOjE4MDAwMDAwNjAsImFjY2VzcyI6InJlYWRfb25seSIsInRvIjoiL2xlZGdlci92YXQifQ.bPKYiScvFFJbyST9Y5aWLOHjMbwIzRePkoC5VnX6imI",
+      "expect": {
+        "ok": true,
+        "claims": {
+          "role": "manager",
+          "access": "read_only",
+          "to": "/ledger/vat"
+        }
+      }
+    },
+    {
+      "id": "sso-w-forbidden-role-viewer",
+      "system": "wholesale",
+      "secretKey": "SSO_WHOLESALE",
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ3aG9sZXNhbGUiLCJhdWQiOiJhY2NvdW50IiwiZXh0X3VzZXIiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJleHRfdGVuYW50IjoiMzMzMzMzMzMtMzMzMy00MzMzLTgzMzMtMzMzMzMzMzMzMzMzIiwicm9sZSI6InZpZXdlciIsIm5hbWUiOiLqsIDrgpjri6Tsg4HsgqwiLCJqdGkiOiJzc28tanRpLTAwMDMiLCJpYXQiOjE4MDAwMDAwMDAsImV4cCI6MTgwMDAwMDA2MH0.sTO0KusP_xKpLyenWy11dHYBO12ord6jh5VVoBeBEsM",
+      "expect": {
+        "ok": false,
+        "code": "SSO_FORBIDDEN_ROLE",
+        "http": 403,
+        "body": "SSO_FORBIDDEN"
+      }
+    },
+    {
+      "id": "sso-s-ok-viewer",
+      "system": "shipping",
+      "secretKey": "SSO_SHIPPING",
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzaGlwcGluZyIsImF1ZCI6ImFjY291bnQiLCJleHRfdXNlciI6IjExMTExMTExLTExMTEtNDExMS04MTExLTExMTExMTExMTExMSIsImV4dF90ZW5hbnQiOiIzMzMzMzMzMy0zMzMzLTQzMzMtODMzMy0zMzMzMzMzMzMzMzMiLCJyb2xlIjoidmlld2VyIiwibmFtZSI6IuqwgOuCmOuLpOyDgeyCrCIsImp0aSI6InNzby1qdGktMDAwNCIsImlhdCI6MTgwMDAwMDAwMCwiZXhwIjoxODAwMDAwMDYwfQ.idiqt4k5AsmWuyhoNxPjkaLHEQu6mMsczLxro-_25WE",
+      "expect": {
+        "ok": true,
+        "claims": {
+          "role": "viewer"
+        }
+      }
+    },
+    {
+      "id": "sso-bad-signature",
+      "system": "wholesale",
+      "secretKey": "SSO_WHOLESALE",
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ3aG9sZXNhbGUiLCJhdWQiOiJhY2NvdW50IiwiZXh0X3VzZXIiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJleHRfdGVuYW50IjoiMzMzMzMzMzMtMzMzMy00MzMzLTgzMzMtMzMzMzMzMzMzMzMzIiwicm9sZSI6Im93bmVyIiwibmFtZSI6IuqwgOuCmOuLpOyDgeyCrCIsImp0aSI6InNzby1qdGktMDAwNSIsImlhdCI6MTgwMDAwMDAwMCwiZXhwIjoxODAwMDAwMDYwfQ.6-sbmrYzOf-GDPk-oiqxnE_QfJkyLSOFiQew_ZvoSb8",
+      "expect": {
+        "ok": false,
+        "code": "SSO_BAD_SIGNATURE",
+        "http": 400
+      }
+    },
+    {
+      "id": "sso-expired",
+      "system": "wholesale",
+      "secretKey": "SSO_WHOLESALE",
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ3aG9sZXNhbGUiLCJhdWQiOiJhY2NvdW50IiwiZXh0X3VzZXIiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJleHRfdGVuYW50IjoiMzMzMzMzMzMtMzMzMy00MzMzLTgzMzMtMzMzMzMzMzMzMzMzIiwicm9sZSI6Im93bmVyIiwibmFtZSI6IuqwgOuCmOuLpOyDgeyCrCIsImp0aSI6InNzby1qdGktMDAwNiIsImlhdCI6MTc5OTk5OTg4MCwiZXhwIjoxNzk5OTk5OTQwfQ.ArGX9k-vqhH5UGUm-8qx2Oe4u-22uzs5t_9S9bksrrw",
+      "expect": {
+        "ok": false,
+        "code": "SSO_EXPIRED",
+        "http": 401
+      }
+    },
+    {
+      "id": "sso-ttl-over-60",
+      "system": "wholesale",
+      "secretKey": "SSO_WHOLESALE",
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ3aG9sZXNhbGUiLCJhdWQiOiJhY2NvdW50IiwiZXh0X3VzZXIiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJleHRfdGVuYW50IjoiMzMzMzMzMzMtMzMzMy00MzMzLTgzMzMtMzMzMzMzMzMzMzMzIiwicm9sZSI6Im93bmVyIiwibmFtZSI6IuqwgOuCmOuLpOyDgeyCrCIsImp0aSI6InNzby1qdGktMDAwNyIsImlhdCI6MTgwMDAwMDAwMCwiZXhwIjoxODAwMDAwMDYxfQ.S2SgnDeUnW6JlfxfrF0rVHrjXaFLsM4N5H3FKWWEqkE",
+      "expect": {
+        "ok": false,
+        "code": "SSO_INVALID_CLAIMS",
+        "http": 400
+      }
+    },
+    {
+      "id": "sso-wrong-issuer",
+      "system": "wholesale",
+      "secretKey": "SSO_WHOLESALE",
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzaGlwcGluZyIsImF1ZCI6ImFjY291bnQiLCJleHRfdXNlciI6IjExMTExMTExLTExMTEtNDExMS04MTExLTExMTExMTExMTExMSIsImV4dF90ZW5hbnQiOiIzMzMzMzMzMy0zMzMzLTQzMzMtODMzMy0zMzMzMzMzMzMzMzMiLCJyb2xlIjoib3duZXIiLCJuYW1lIjoi6rCA64KY64uk7IOB7IKsIiwianRpIjoic3NvLWp0aS0wMDA4IiwiaWF0IjoxODAwMDAwMDAwLCJleHAiOjE4MDAwMDAwNjB9.ZRmvgtZ5LhC2gBFA0xEjUsBZUBwLVmOGEA0w-2mQVYs",
+      "expect": {
+        "ok": false,
+        "code": "SSO_INVALID_CLAIMS",
+        "http": 400
+      }
+    },
+    {
+      "id": "sso-bad-access",
+      "system": "wholesale",
+      "secretKey": "SSO_WHOLESALE",
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ3aG9sZXNhbGUiLCJhdWQiOiJhY2NvdW50IiwiZXh0X3VzZXIiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJleHRfdGVuYW50IjoiMzMzMzMzMzMtMzMzMy00MzMzLTgzMzMtMzMzMzMzMzMzMzMzIiwicm9sZSI6Im93bmVyIiwibmFtZSI6IuqwgOuCmOuLpOyDgeyCrCIsImp0aSI6InNzby1qdGktMDAwOSIsImlhdCI6MTgwMDAwMDAwMCwiZXhwIjoxODAwMDAwMDYwLCJhY2Nlc3MiOiJmcm96ZW4ifQ.1S0n97WLOdB0dlWOvtK18vuulHYbYb5YQ79Cq7If05g",
+      "expect": {
+        "ok": false,
+        "code": "SSO_INVALID_CLAIMS",
+        "http": 400
+      }
+    },
+    {
+      "id": "sso-bad-uuid",
+      "system": "wholesale",
+      "secretKey": "SSO_WHOLESALE",
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJ3aG9sZXNhbGUiLCJhdWQiOiJhY2NvdW50IiwiZXh0X3VzZXIiOiJub3QtYS11dWlkIiwiZXh0X3RlbmFudCI6IjMzMzMzMzMzLTMzMzMtNDMzMy04MzMzLTMzMzMzMzMzMzMzMyIsInJvbGUiOiJvd25lciIsIm5hbWUiOiLqsIDrgpjri6Tsg4HsgqwiLCJqdGkiOiJzc28tanRpLTAwMTAiLCJpYXQiOjE4MDAwMDAwMDAsImV4cCI6MTgwMDAwMDA2MH0.vL0xWi43f6-jRE9_0Cn4kRsG_auq25KC9bPIWFIlfps",
+      "expect": {
+        "ok": false,
+        "code": "SSO_INVALID_CLAIMS",
+        "http": 400
+      }
+    }
+  ],
+  "signed_calls": [
+    {
+      "id": "w-suspend-ok",
+      "route": "/api/provision/wholesale-suspend",
+      "secretKey": "SUSPEND_WHOLESALE",
+      "body": "{\"system\":\"wholesale\",\"action\":\"suspend\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"ext_user\":\"22222222-2222-4222-8222-222222222222\",\"jti\":\"call-jti-0001\",\"iat\":1800000000,\"exp\":1800000060}",
+      "signature": "8a8fda89523559943a20f2497788cdcaa2c28d2fddeac7785d4e965a8d8e9266",
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "id": "w-suspend-legacy-no-action-ok",
+      "route": "/api/provision/wholesale-suspend",
+      "secretKey": "SUSPEND_WHOLESALE",
+      "body": "{\"system\":\"wholesale\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"ext_user\":\"22222222-2222-4222-8222-222222222222\",\"jti\":\"call-jti-0002\",\"iat\":1800000000,\"exp\":1800000060}",
+      "signature": "cb2e737514f1ad796bd9a9652d4e453232abc3cf75dbbe088a22a26e68528482",
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "id": "w-resume-ok",
+      "route": "/api/provision/wholesale-resume",
+      "secretKey": "SUSPEND_WHOLESALE",
+      "body": "{\"system\":\"wholesale\",\"action\":\"resume\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"ext_user\":\"22222222-2222-4222-8222-222222222222\",\"jti\":\"call-jti-0003\",\"iat\":1800000000,\"exp\":1800000060}",
+      "signature": "dbf2e0582fb67f346efb19aa3ec8f71042500e3fd841a580d33e820dc7a5e2e7",
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "id": "w-resume-with-suspend-body",
+      "route": "/api/provision/wholesale-resume",
+      "secretKey": "SUSPEND_WHOLESALE",
+      "body": "{\"system\":\"wholesale\",\"action\":\"suspend\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"ext_user\":\"22222222-2222-4222-8222-222222222222\",\"jti\":\"call-jti-0004\",\"iat\":1800000000,\"exp\":1800000060}",
+      "signature": "1de55a12fec8691cb2beabc9ae40849e72da9c95e4e2fed4d2a9d5bfd1cd0d7e",
+      "expect": {
+        "ok": false,
+        "code": "CALL_INVALID",
+        "http": 400
+      }
+    },
+    {
+      "id": "w-access-ok",
+      "route": "/api/provision/wholesale-access",
+      "secretKey": "SUSPEND_WHOLESALE",
+      "body": "{\"system\":\"wholesale\",\"action\":\"set_access\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"access\":\"read_only\",\"jti\":\"call-jti-0005\",\"iat\":1800000000,\"exp\":1800000060}",
+      "signature": "818143355b2fcb5bbcdae6c7b6e735afa08117d250a9233ddaea2413846e2cc0",
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "id": "w-access-bad-value",
+      "route": "/api/provision/wholesale-access",
+      "secretKey": "SUSPEND_WHOLESALE",
+      "body": "{\"system\":\"wholesale\",\"action\":\"set_access\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"access\":\"frozen\",\"jti\":\"call-jti-0006\",\"iat\":1800000000,\"exp\":1800000060}",
+      "signature": "b591bcfa1955db500524b48535a42dd366b2b1fab5c50d73602f02ad46f98f91",
+      "expect": {
+        "ok": false,
+        "code": "CALL_INVALID",
+        "http": 400
+      }
+    },
+    {
+      "id": "w-holds-ok",
+      "route": "/api/provision/wholesale-holds",
+      "secretKey": "HOLDS_WHOLESALE",
+      "body": "{\"system\":\"wholesale\",\"action\":\"read_holds\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"kind\":\"SALE\",\"jti\":\"call-jti-0007\",\"iat\":1800000000,\"exp\":1800000060}",
+      "signature": "811b0fb340fe246ecbca8771e0c2e7b71d227bc17646b8580fa2485980fad2a0",
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "id": "w-holds-ok-no-kind",
+      "route": "/api/provision/wholesale-holds",
+      "secretKey": "HOLDS_WHOLESALE",
+      "body": "{\"system\":\"wholesale\",\"action\":\"read_holds\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"jti\":\"call-jti-0008\",\"iat\":1800000000,\"exp\":1800000060}",
+      "signature": "7101ea9a15cacbdb9461dae9cb3d3bd2c2d6e359f1b376b1887ac0aeda4d57cf",
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "id": "w-holds-wrong-secret",
+      "route": "/api/provision/wholesale-holds",
+      "secretKey": "HOLDS_WHOLESALE",
+      "body": "{\"system\":\"wholesale\",\"action\":\"read_holds\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"jti\":\"call-jti-0009\",\"iat\":1800000000,\"exp\":1800000060}",
+      "signature": "92238e778515b9e14713dff5698f3914187cf193b2caa89390ba1aa735bd6e39",
+      "expect": {
+        "ok": false,
+        "code": "CALL_BAD_SIGNATURE",
+        "http": 401
+      }
+    },
+    {
+      "id": "w-holds-bad-kind",
+      "route": "/api/provision/wholesale-holds",
+      "secretKey": "HOLDS_WHOLESALE",
+      "body": "{\"system\":\"wholesale\",\"action\":\"read_holds\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"kind\":\"sale\",\"jti\":\"call-jti-0010\",\"iat\":1800000000,\"exp\":1800000060}",
+      "signature": "337aa49e4b0a012869c0278b699a1e2eaee9c851e4e44cb7d1a12e81dfa4e615",
+      "expect": {
+        "ok": false,
+        "code": "CALL_INVALID",
+        "http": 400
+      }
+    },
+    {
+      "id": "w-holds-expired",
+      "route": "/api/provision/wholesale-holds",
+      "secretKey": "HOLDS_WHOLESALE",
+      "body": "{\"system\":\"wholesale\",\"action\":\"read_holds\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"jti\":\"call-jti-0011\",\"iat\":1799999880,\"exp\":1799999940}",
+      "signature": "1232ab9c83fc5a30242558994fd0344bba9c3674b103920b90b5c7ecd140cce2",
+      "expect": {
+        "ok": false,
+        "code": "CALL_EXPIRED",
+        "http": 401
+      }
+    },
+    {
+      "id": "w-holds-ttl-over-60",
+      "route": "/api/provision/wholesale-holds",
+      "secretKey": "HOLDS_WHOLESALE",
+      "body": "{\"system\":\"wholesale\",\"action\":\"read_holds\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"jti\":\"call-jti-0012\",\"iat\":1800000000,\"exp\":1800000061}",
+      "signature": "233f5c3bba446831da0a6752e9f6f625e50d1dd9f2031a30b9d634d2e04f42f5",
+      "expect": {
+        "ok": false,
+        "code": "CALL_INVALID",
+        "http": 400
+      }
+    },
+    {
+      "id": "w-holds-tampered",
+      "route": "/api/provision/wholesale-holds",
+      "secretKey": "HOLDS_WHOLESALE",
+      "body": "{\"system\":\"wholesale\",\"action\":\"read_holds\", \"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"jti\":\"call-jti-0013\",\"iat\":1800000000,\"exp\":1800000060}",
+      "signature": "39ae33a1c4b06ce93ac622b6bb045faa648bc9b5369c83ce5574f3373a9c7b7d",
+      "expect": {
+        "ok": false,
+        "code": "CALL_BAD_SIGNATURE",
+        "http": 401
+      }
+    },
+    {
+      "id": "s-suspend-ok",
+      "route": "/api/provision/external-suspend",
+      "secretKey": "SERVER_SHIPPING",
+      "body": "{\"system\":\"shipping\",\"action\":\"suspend\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"ext_user\":\"22222222-2222-4222-8222-222222222222\",\"jti\":\"call-jti-0101\",\"iat\":1800000000,\"exp\":1800000060}",
+      "signature": "8053921fb651a30f199c0d4d8a7744e9bee1dd4c0bb542e53f1340874cf4a45d",
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "id": "s-resume-ok",
+      "route": "/api/provision/external-resume",
+      "secretKey": "SERVER_SHIPPING",
+      "body": "{\"system\":\"shipping\",\"action\":\"resume\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"ext_user\":\"22222222-2222-4222-8222-222222222222\",\"jti\":\"call-jti-0102\",\"iat\":1800000000,\"exp\":1800000060}",
+      "signature": "395a88b24ed040411bd369f58542471b43081285c0a4ec133e462c194340c610",
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "id": "s-access-ok",
+      "route": "/api/provision/external-access",
+      "secretKey": "SERVER_SHIPPING",
+      "body": "{\"system\":\"shipping\",\"action\":\"set_access\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"access\":\"normal\",\"jti\":\"call-jti-0103\",\"iat\":1800000000,\"exp\":1800000060}",
+      "signature": "bb5dcf1cea465c578a8b1bfac7a370fcad7c3628300c572f142a463bd2002721",
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "id": "s-transfer-ok",
+      "route": "/api/provision/external-transfer-owner",
+      "secretKey": "SERVER_SHIPPING",
+      "body": "{\"system\":\"shipping\",\"action\":\"transfer_owner\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"new_owner\":\"22222222-2222-4222-8222-222222222222\",\"old_owner\":\"11111111-1111-4111-8111-111111111111\",\"jti\":\"call-jti-0104\",\"iat\":1800000000,\"exp\":1800000060}",
+      "signature": "4016791a3d4c9e08a99ea9b86b179e173da0655eb3fedf7c5a86b28bb4a525b5",
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "id": "s-transfer-same-owner",
+      "route": "/api/provision/external-transfer-owner",
+      "secretKey": "SERVER_SHIPPING",
+      "body": "{\"system\":\"shipping\",\"action\":\"transfer_owner\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"new_owner\":\"11111111-1111-4111-8111-111111111111\",\"old_owner\":\"11111111-1111-4111-8111-111111111111\",\"jti\":\"call-jti-0105\",\"iat\":1800000000,\"exp\":1800000060}",
+      "signature": "e251ab8471c35ba601a29d0530b378d50fe389e2cc12477678a8a66b5ab0c314",
+      "expect": {
+        "ok": false,
+        "code": "CALL_INVALID",
+        "http": 400
+      }
+    },
+    {
+      "id": "s-suspend-missing-user",
+      "route": "/api/provision/external-suspend",
+      "secretKey": "SERVER_SHIPPING",
+      "body": "{\"system\":\"shipping\",\"action\":\"suspend\",\"ext_tenant\":\"33333333-3333-4333-8333-333333333333\",\"jti\":\"call-jti-0106\",\"iat\":1800000000,\"exp\":1800000060}",
+      "signature": "446e4fd1ef2f977013d00fccb8c2af9913f2ff53326d741098ad1a08b3dcba51",
+      "expect": {
+        "ok": false,
+        "code": "CALL_INVALID",
+        "http": 400
+      }
+    }
+  ],
+  "response_actions": [
+    {
+      "http": 200,
+      "body": "status: SUSPENDED | ALREADY_SUSPENDED | RESUMED | ALREADY_ACTIVE | UPDATED | UNCHANGED",
+      "action": "SUCCESS",
+      "note": "멱등 성공. 큐 항목 완료"
+    },
+    {
+      "http": 200,
+      "body": "status: NO_LINK | NO_USER | NOT_MEMBER",
+      "action": "SUCCESS_NOOP",
+      "note": "연결·구성원 없음(변경 없음). 재시도 불필요, 완료 처리"
+    },
+    {
+      "http": 200,
+      "body": "status: STALE",
+      "action": "SUCCESS",
+      "note": "seq 계약 구현 후에만 나옴(현재 account 미구현). 더 새로운 의도가 이미 반영됨"
+    },
+    {
+      "http": 200,
+      "body": "보류 요약 JSON(total_count 등)",
+      "action": "SUCCESS",
+      "note": "wholesale-holds 전용"
+    },
+    {
+      "http": 400,
+      "body": "CALL_INVALID | CALL_MALFORMED | SUSPEND_INVALID | SUSPEND_MALFORMED",
+      "action": "STOP",
+      "note": "요청 형식 오류. 같은 본문 재시도 금지, 코드 점검(알림)"
+    },
+    {
+      "http": 401,
+      "body": "CALL_BAD_SIGNATURE | SUSPEND_BAD_SIGNATURE",
+      "action": "STOP",
+      "note": "비밀 불일치·본문 변조. 재시도 금지, 설정 점검(알림)"
+    },
+    {
+      "http": 401,
+      "body": "CALL_EXPIRED | SUSPEND_EXPIRED",
+      "action": "RETRY_NEW_JTI",
+      "note": "만료(지연). 새 jti·새 iat/exp 로 재서명해 재시도"
+    },
+    {
+      "http": 403,
+      "body": "SUSPEND_OWNER_FORBIDDEN | RESUME_OWNER_FORBIDDEN",
+      "action": "STOP",
+      "note": "소유자는 정지·해제 대상이 아님. 재시도 금지"
+    },
+    {
+      "http": 404,
+      "body": "NOT_FOUND (wholesale-holds: 연결 없는 업체)",
+      "action": "STOP",
+      "note": "업체 연결 설정 오류. 재시도 금지(연결 후 다시)"
+    },
+    {
+      "http": 409,
+      "body": "CALL_REPLAY | SUSPEND_REPLAY",
+      "action": "TREAT_AS_SENT",
+      "note": "같은 jti 재전송. 이미 처리된 요청이므로 성공으로 간주하거나 새 jti 로 확인"
+    },
+    {
+      "http": 409,
+      "body": "SEQ_CONFLICT",
+      "action": "STOP",
+      "note": "seq 계약 구현 후에만. 같은 seq 에 다른 동작 — 재시도 금지, 알림"
+    },
+    {
+      "http": 409,
+      "body": "OLD_NOT_OWNER | LAST_OWNER",
+      "action": "STOP",
+      "note": "대표 이전 전제 위반. 재시도 금지"
+    },
+    {
+      "http": 413,
+      "body": "CALL_TOO_LARGE",
+      "action": "STOP",
+      "note": "본문 8KB 초과"
+    },
+    {
+      "http": 500,
+      "body": "SUSPEND_FAILED | RESUME_FAILED | ACCESS_FAILED | HOLDS_FAILED | TRANSFER_FAILED",
+      "action": "RETRY_NEW_JTI",
+      "note": "서버 오류. 새 jti 로 재시도(멱등), 지수 백오프"
+    },
+    {
+      "http": 503,
+      "body": "*_NOT_CONFIGURED",
+      "action": "RETRY_LATER",
+      "note": "account 쪽 비밀·설정 없음. 설정 전까지 큐에 보관"
+    },
+    {
+      "http": "network",
+      "body": "연결 실패·타임아웃",
+      "action": "RETRY_NEW_JTI",
+      "note": "결과를 모르므로 새 jti 로 재시도(멱등 설계)"
+    }
+  ]
+}

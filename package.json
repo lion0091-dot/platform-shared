@@ -1,12 +1,13 @@
 {
   "name": "@platform/shared",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "플랫폼 공용 코드(wholesale·shipping-prj 등). 소스(.ts)를 그대로 배포하고 쓰는 앱이 빌드한다(Next transpilePackages).",
   "type": "module",
   "exports": {
     "./push/fcm": "./src/push/fcm.ts",
-    "./push/native": "./src/push/native.ts"
+    "./push/native": "./src/push/native.ts",
+    "./account": "./src/account/index.ts"
   },
   "files": ["src"],
   "scripts": {
