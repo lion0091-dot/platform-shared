@@ -79,6 +79,7 @@ describe("SSO 토큰 벡터", () => {
     expect(claims({ ...base, to: "/ledger/vat" }).to).toBe("/ledger/vat");
     expect(claims(base)).not.toHaveProperty("to");
     expect(claims({ ...base, ownerExtUser: "not-uuid" })).not.toHaveProperty("owner_ext_user");
+    expect(claims({ ...base, ownerExtUser: "AAAAAAAA-1111-4111-8111-111111111111" }).owner_ext_user).toBe("aaaaaaaa-1111-4111-8111-111111111111");
     expect(claims({ ...base, access: "frozen" as never })).not.toHaveProperty("access");
     expect(claims({ ...base, access: "read_only", accessSeq: 5 })).toMatchObject({ access: "read_only", access_seq: 5 });
   });
@@ -112,10 +113,21 @@ describe("응답 분류 벡터", () => {
 
         if (statuses.length === 0) expect(classifyAccountResponse(200, { total_count: 1 }).action).toBe("sent");
       } else {
-        for (const code of samples) expect(classifyAccountResponse(row.http, { error: code }).action, `${row.http} ${code}`).toBe(expected[row.action]);
+        for (const code of samples) {
+          // 계약 표는 대표 거부(*_OWNER_FORBIDDEN)를 STOP 으로 적었지만 공용은 앱이 정책을 고르도록 별도 범주로 알린다.
+          const want = /OWNER_FORBIDDEN$/.test(code) ? "owner_forbidden" : expected[row.action];
+
+          expect(classifyAccountResponse(row.http, { error: code }).action, `${row.http} ${code}`).toBe(want);
+        }
         if (samples.length === 0) expect(classifyAccountResponse(row.http, { error: "NOT_FOUND" }).action, `${row.http}`).toBe(expected[row.action]);
       }
     }
+  });
+
+  it("대표 정지·해제 거부(403)는 별도 범주로 알린다", () => {
+    expect(classifyAccountResponse(403, { error: "SUSPEND_OWNER_FORBIDDEN" }).action).toBe("owner_forbidden");
+    expect(classifyAccountResponse(403, { error: "RESUME_OWNER_FORBIDDEN" }).action).toBe("owner_forbidden");
+    expect(classifyAccountResponse(403, { error: "OTHER" }).action).toBe("stop");
   });
 
   it("알 수 없는 5xx 는 재시도, 알 수 없는 4xx 는 멈춤", () => {

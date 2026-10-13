@@ -56,7 +56,8 @@ export function signSsoToken(secret: string, input: SsoClaimsInput, deps: { now?
       ...(hasAccess ? { access: input.access } : {}),
       ...(hasAccess && Number.isSafeInteger(input.accessSeq) && (input.accessSeq as number) >= 1 ? { access_seq: input.accessSeq } : {}),
       ...(input.to !== undefined ? { to: ssoTarget(input.to) } : {}),
-      ...(input.ownerExtUser && UUID_RE.test(input.ownerExtUser) ? { owner_ext_user: input.ownerExtUser } : {}),
+      // account 는 uuid 를 소문자로 정규화해 처리한다(계약 §4) — 같은 값이 되도록 소문자로 싣는다.
+      ...(input.ownerExtUser && UUID_RE.test(input.ownerExtUser) ? { owner_ext_user: input.ownerExtUser.toLowerCase() } : {}),
     })
   );
 
