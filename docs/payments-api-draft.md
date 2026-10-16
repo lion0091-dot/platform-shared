@@ -27,6 +27,8 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 
 `TossPayment = {paymentKey, orderId, status(토스 원문), totalAmount, method, approvedAt, balanceAmount(취소 가능 잔액, 없으면 null), cancels[]}`. `cancels` 항목은 `{cancelAmount, cancelReason, canceledAt, transactionKey, cancelStatus(DONE=성공)}`(Payment 객체의 `cancels`, null 이면 빈 배열). `canceled(alreadyCanceled:true)` 일 때 앱은 "토스에서 이미 취소된 금액"을 `cancels` 의 `cancelAmount` 합(또는 `totalAmount - balanceAmount`)으로 알 수 있다 — 앱 DB 와 대조해 정리.
 
+금액(`amount`·`cancelAmount`·`alreadyCanceledTotal`)은 양의 정수(원)여야 하며 아니면 호출 전에 throw 한다. numeric 컬럼(예: pending.total_amount)을 쓰는 앱은 정수로 변환한 값을 넘긴다(변환 전 소수·문자열을 그대로 넘기지 않는다).
+
 입력 검증(호출 전 throw): `confirmPayment`·`getPaymentByOrderId` 는 orderId 가 영문·숫자·`-`·`_` 6~64자가 아니면 `INVALID_ORDER_ID`(uuid 36자는 통과). 외부 호출은 나가지 않는다.
 
 ## 3. 오류 분류표
@@ -59,6 +61,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 | `not_found` (404) | 그 주문번호로 승인된 결제 없음 | 승인 없음. 단 막 호출한 직후라면 지연 가능성이 있어 앱이 유예 시간을 정한다(미확인: 토스 쪽 반영 지연) |
 | `retry_later`(`FORBIDDEN_CONSECUTIVE_REQUEST`·429) / `uncertain`(5xx·타임아웃·형식 이상) | 조회 실패 | PENDING 유지, 잠시 뒤 재조회 |
 | `fatal` (401·403 등) | 키·권한 | 알림 |
+**`not_found` 로 "승인 없음"을 포기·확정하는 유예(권장)**: 승인 호출 시각으로부터 **최소 30분 이상**이면서 **앱의 결제 만료 시각 이후**에만 포기한다(승인 유효시간이 문서에서 10분 vs 30분으로 달라 보수적으로 큰 쪽을 쓴다 — 근거는 shipping 점검표 인용, 이번에 재확인 안 함). 그 전의 `not_found` 는 PENDING 유지 후 재조회.
 조회 응답 DONE 의 `totalAmount` 는 최초 결제 금액이며 취소돼도 변하지 않는다(shipping 점검표 기준).
 
 ### 3.3 취소(cancel)
@@ -83,6 +86,8 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - **에러가 나도 키를 바꿔 재시도하지 않는다.** 원인을 조회로 확인한 뒤 같은 키로 보낸다.
 - **confirm 키 = 주문번호 + paymentKey 조합**: `confirmIdempotencyKey(orderId, paymentKey)` = `confirm_<orderId>_<paymentKey>`. 같은 주문번호로 새 결제창을 열어 새 paymentKey 가 생기면 새 키가 되어 이전 시도의 캐시 응답이 재사용되지 않는다. 재시도·새로고침 때는 같은 paymentKey 라 같은 키. (paymentKey 가 길어 300자를 넘으면 throw — 실제 길이는 미확인, 보통 약 40~200자 추정이나 단정 못 함.)
 - **cancel 키**: 호출자가 반드시 넘긴다. 전액 취소 = `cancelIdempotencyKey({paymentKey})` = `cancel_<paymentKey>_full`. **부분 취소 = `cancelIdempotencyKey({paymentKey, cancelAmount, alreadyCanceledTotal})` = `cancel_<paymentKey>_<취소누계>_<금액>` 이며 `alreadyCanceledTotal`(요청 직전 토스 기준 취소 누계)이 필수**(타입·런타임 모두, 없으면 throw). 누계를 빼면 같은 금액의 두 번째 부분 취소가 첫 번째와 같은 키가 되어 토스가 첫 응답을 돌려주고 실제 환불은 1회뿐인데 앱은 두 번 환불된 줄 알게 된다.
+- **캐시 재생(15일)**: 같은 결제의 전액 취소 키는 재시도마다 동일(`cancel_<paymentKey>_full`)하므로 토스가 15일간 첫 응답을 돌려준다(문서: "중복 요청은 첫 요청과 같은 응답"). 문서는 **에러 응답도 재생되는지, 첫 시도가 `not_cancelable`·`fatal` 로 끝난 뒤 조건이 풀리면 같은 키로 다시 성공할 수 있는지를 밝히지 않는다 → 미확인, 안전 쪽 가정: 에러도 재생된다고 본다.** 따라서 `not_cancelable`·`fatal` 이 나온 취소를 같은 키로 다시 보내지 않고 **"사람이 처리"**(운영자 수동 환불·토스 대시보드 취소)로 보낸다. 사람이 처리한 뒤 DB 정리는 `getPayment` 로 CANCELED 확인 후 앱이 한다. (`uncertain`·`retry_later`·`processing` 은 같은 키로 재시도하는 것이 규칙이다 — 그 경우의 재생은 의도된 동작.)
+- **취소 경로가 여럿이어도 키는 하나의 규칙으로**: `approved_mismatch` 후속 취소, 핫딜 매진·재고 부족 등 앱의 자동 환불, 운영자 취소가 **같은 결제를 취소하려 할 수 있다.** 모든 경로는 반드시 `cancelIdempotencyKey` 로 키를 만든다(앱이 임의 키를 만들지 않는다). 같은 결제·같은 금액(·같은 누계)이면 같은 키가 되어 토스가 중복 취소를 한 번만 처리한다. 경로마다 키를 달리 만들면 이중 환불 위험이 있다.
 - **앱 규칙(부분 취소)**: 취소 직전에 `getPayment` 로 현재 취소 누계(`cancels` 합 또는 `totalAmount - balanceAmount`)를 조회해 `alreadyCanceledTotal` 로 넘긴다. 같은 취소 건을 재시도할 때는 처음 조회한 누계와 같은 키를 그대로 쓴다(재시도 중 누계가 바뀌었다고 키를 바꾸지 않는다 — 불확실하면 먼저 조회).
 - 키 문자는 보이는 ASCII(`!`~`~`)만 허용(우리 쪽 안전 제약; 토스 문서의 문자 제한은 미확인).
 - 키는 로그에 남겨도 비밀이 아니지만 시크릿키·Authorization 헤더는 절대 로그에 남기지 않는다.
@@ -112,6 +117,8 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - **결제창 SDK 는 2단계**(이 모듈에 없음). 현재 SDK 를 그대로 쓴다.
 - 취소는 현재 전액(`cancelAmount` 생략)만 쓴다 → 그대로 호환. 부분취소를 쓸 때는 §4 의 누계 규칙(취소 전 조회해 `alreadyCanceledTotal` 전달)을 따른다. shipping 은 부분 환불을 쓰므로 기존 키 `refund-<id>-<기환불합계>-<금액>` 과 같은 발상이지만 이 모듈의 키 함수로 바꾸면 기존 진행 중 취소의 키가 달라지니 전환 시점에 진행 중인 취소가 없는지 확인한다.
 ### 공통
+- 취소 키는 모든 취소 경로(`approved_mismatch` 후속, 핫딜 매진·재고 부족 등 자동 환불, 운영자 취소)에서 **반드시 `cancelIdempotencyKey`** 로 만든다. 앱이 임의 키를 만들지 않는다(§4).
+- 크론이 `not_found` 로 포기하기 전 유예는 승인 호출 후 30분 이상 + 앱 만료 시각 이후(§3.2).
 - 앱 package.json 에 platform-shared 새 버전을 올릴 때 두 앱을 같이 올린다(README 규칙). 아직 버전·태그 없음.
 - 앱 시험에서는 `fetch` 를 주입(`cfg.fetch`)해 모의한다.
 
@@ -126,4 +133,6 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - 위험(문서 근거 없음): confirm 의 `INVALID_REQUEST` 는 "결제가 일어나지 않았다"는 보장이 토스 문서에 없다. 승인이 이미 처리된 뒤 같은 요청이 `INVALID_REQUEST` 로 거절되는 경우(예: 이미 사용된 paymentKey 형식 문제)가 있는지 미확인 → 앱은 `fatal` 로 FAILED 확정하기 전에 `getPaymentByOrderId` 로 한 번 확인하는 것이 안전하다(비용 작음). 요청 값은 호출 전 검증(금액·orderId)으로 이미 걸러진다.
 - lookup 에서 `fatal`: 분류표의 분명한 실패 코드(`UNAUTHORIZED_KEY`·`FORBIDDEN_REQUEST`·`INVALID_REQUEST`·`INVALID_API_KEY` 등)만 `fatal`, 그 밖의 모르는 코드·5xx 는 `uncertain` 으로 떨어진다. 앱 영향: lookup `fatal` 은 "확인 불가"일 뿐 결제 실패가 아니다 → PENDING 유지 + 운영 알림, FAILED/취소로 바꾸지 않는다. 404·`NOT_FOUND_PAYMENT`·`NOT_FOUND` 는 `not_found`(승인 없음).
 - `balanceAmount`·`cancels` 필드명·타입은 토스 reference 페이지(Payment 객체)에서 확인: `balanceAmount` number, `cancels` nullable array(`cancelAmount`·`cancelReason`·`canceledAt`·`transactionKey`·`cancelStatus` 등). 전용 payment-object 주소는 404 였고 reference 메인에서 확인.
+- 에러 응답의 멱등키 재생 여부(§4)는 미확인(안전 쪽 가정: 재생됨).
+- `TossPayment` 는 현재 method 외의 카드 정보·영수증 URL 등을 포함하지 않는다(필요해지면 추가).
 - 모든 동작은 fetch 모의로만 검증, 실제 토스 호출·테스트 키 검증 없음.
