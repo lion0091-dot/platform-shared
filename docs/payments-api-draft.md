@@ -1,0 +1,119 @@
+# 공용 결제 라이브러리 초안 — `@platform/shared/payments`
+
+상태: 초안(버전·태그 없음, 모의 시험만 통과, 실제 토스 호출 없음). 대상: meatpartners·shipping 개발자. 근거: docs.tosspayments.com 의 에러 코드·멱등키 페이지(2026-10-16 열람), 두 앱의 기존 결제 코드. 문서에서 확인 못 한 것은 "미확인".
+
+## 1. 범위
+포함: 승인(confirm)·조회(주문번호/paymentKey)·취소(cancel) 호출, Basic 인증, 타임아웃, Idempotency-Key 규칙, 승인 응답 검증, 오류 분류, failUrl code 분류, 주문번호 검증·생성.
+제외(앱이 한다): 주문 생성·금액 산정·DB·RLS·장부·정산·알림, 각 앱의 상태머신(meatpartners pending 테이블 / shipping PENDING 상태), 결제창 SDK 래퍼(v1/v2 통일은 2단계), 웹훅 수신, 재시도 스케줄(크론). 라이브러리는 **호출 한 번 + 분류**만 하고 내부에서 재시도하지 않는다. 비밀값은 받기만 하고 저장·기록하지 않는다(공개 저장소).
+
+## 2. 사용법
+```ts
+import { createTossClient, interpretPayment, confirmIdempotencyKey, cancelIdempotencyKey, classifyFailCode, generateOrderId } from "@platform/shared/payments";
+const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // fetch·baseUrl·timeoutMs(기본 15000) 선택
+```
+낱개 함수도 같다: `confirmPayment(cfg, input)`, `getPaymentByOrderId(cfg, orderId)`, `getPayment(cfg, paymentKey)`, `cancelPayment(cfg, input)`. 잘못된 입력(금액이 양의 정수 아님, 멱등키 규칙 위반)은 **호출 전에 throw**.
+
+### 2.1 시그니처
+| 함수 | 입력 | 출력 |
+|---|---|---|
+| `confirmPayment` | `{paymentKey, orderId, amount(서버 기대 금액, 원·정수), idempotencyKey?}` | `ConfirmOutcome` |
+| `getPaymentByOrderId` / `getPayment` | orderId / paymentKey | `LookupOutcome` |
+| `cancelPayment` | `{paymentKey, cancelReason(200자로 자름), cancelAmount?(생략=전액), idempotencyKey(필수)}` | `CancelOutcome` |
+| `interpretPayment(payment, {orderId, amount})` | 조회 결과 + 앱이 DB 에서 가져온 기대값 | `paid`·`canceled`·`partial_canceled`·`in_progress`·`not_paid`·`mismatch` |
+| `classifyFailCode(code)` | failUrl 쿼리 code | `user_canceled`·`aborted`·`card_rejected`·`other` |
+| `classifyTossError(op, httpStatus, code)` | 순수 분류 | `ErrorClass` |
+| `isValidOrderId` / `assertOrderId` / `generateOrderId(prefix?)` | | 영문·숫자·`-`·`_` 6~64자. 생성은 prefix+UUID |
+| `confirmIdempotencyKey(orderId, paymentKey)` / `cancelIdempotencyKey({paymentKey, cancelAmount?, alreadyCanceledTotal?})` | | 문자열(300자 이하 보장, 넘으면 throw) |
+
+`TossPayment = {paymentKey, orderId, status(토스 원문), totalAmount, method, approvedAt}`.
+
+## 3. 오류 분류표
+
+### 3.1 승인(confirm)
+앱이 보는 3분류: **분명한 실패**(즉시 실패 확정 가능) / **승인 안 됨 확정**(조회로 확정) / **불확실**(PENDING 유지 후 조회로 확정).
+
+| 토스 응답 | `kind` | 3분류 | 앱이 할 일 |
+|---|---|---|---|
+| 200, status=DONE, orderId·paymentKey 일치, totalAmount=기대 금액 | `success` | 승인 | 결제 완료 반영 |
+| 200 인데 orderId/paymentKey 불일치 또는 totalAmount≠기대 금액 | `approved_mismatch`(`reason`) | **토스에선 승인된 상태** | PG 취소 연계가 필요: 앱이 `cancelPayment` 호출 여부 결정, 주문은 완료로 반영하지 말고 사람이 확인 |
+| 200 인데 status≠DONE 또는 형식 이상 | `uncertain`(`STATUS_x`/`BAD_RESPONSE`) | 불확실 | PENDING 유지, 조회 |
+| 400 `ALREADY_PROCESSED_PAYMENT` | `already_done` | 조회로 확정 | `getPaymentByOrderId` → `interpretPayment`=paid 면 완료 반영(주문·금액 일치 때만) |
+| 409 `IDEMPOTENT_REQUEST_PROCESSING`, 400 `ALREADY_PROCESSING_REQUEST` | `processing` | 불확실 | PENDING 유지, 잠시 뒤 조회(또는 같은 키로 재호출). **FAILED 금지** |
+| 400 `PROVIDER_ERROR`, 500 `FAILED_INTERNAL_SYSTEM_PROCESSING`·`FAILED_PAYMENT_INTERNAL_SYSTEM_PROCESSING`, 5xx 전부, 429, 타임아웃(`TIMEOUT`), 네트워크(`NETWORK`), **목록에 없는 모든 코드**, `CARD_PROCESSING_ERROR` | `uncertain` | 불확실 | PENDING 유지, 조회로 확정. **FAILED 확정 금지** |
+| 404 `NOT_FOUND_PAYMENT_SESSION` | `session_expired` | 분명한 실패(세션 만료) | 새 결제창으로 다시 시작(새 paymentKey) |
+| 401 `UNAUTHORIZED_KEY`, 403 `FORBIDDEN_REQUEST`, 404 `NOT_FOUND_PAYMENT` | `fatal` | 분명한 실패 | 즉시 실패. 키 오류는 운영 알림 필요 |
+| 403 `REJECT_CARD_COMPANY`(승인 거절)·`REJECT_CARD_PAYMENT`(한도초과·잔액부족)·`REJECT_ACCOUNT_PAYMENT`·`REJECT_TOSSPAY_INVALID_ACCOUNT`, 400 `INVALID_REJECT_CARD`·`INVALID_CARD_EXPIRATION`·`INVALID_STOPPED_CARD`·`INVALID_CARD_LOST_OR_STOLEN`·`INVALID_CARD_NUMBER`·`INVALID_CARD_INSTALLMENT_PLAN`·`NOT_SUPPORTED_INSTALLMENT_PLAN_CARD_OR_MERCHANT` | `fatal` | 분명한 실패 | 즉시 실패 + 사용자 안내(다른 카드/수단). 코드 목록은 `DEFINITE_FAILURE` |
+
+참고: shipping 의 가짜 코드 `REJECT_CARD` 는 없다. 실제 코드는 `REJECT_CARD_PAYMENT`·`REJECT_CARD_COMPANY` 다(`REJECT_CARD_PAYMENT` 는 승인 API 섹션에만 있고 "전체 에러 목록"에는 없음 — 문서 내부 차이).
+
+### 3.2 조회 결과 판정(불확실 → 확정)
+`getPaymentByOrderId` 결과:
+| `LookupOutcome` | 의미 | 앱이 할 일 |
+|---|---|---|
+| `found` + `interpretPayment`=`paid` (DONE, orderId·금액 일치) | 승인됨 | 완료 반영 |
+| `found` + `not_paid` (ABORTED·EXPIRED) 또는 `canceled` (CANCELED) | 승인 안 됨 확정 | 실패 확정(CANCELED 는 승인됐다가 취소된 것 — 이 결제로는 미결제) |
+| `found` + `in_progress` (READY·IN_PROGRESS·WAITING_FOR_DEPOSIT 등) | 아직 진행 | PENDING 유지, 나중에 다시 조회 |
+| `found` + `mismatch` | 주문번호·금액이 기대와 다름 | 자동 확정 금지, 사람이 확인(승인됐다면 취소 연계) |
+| `not_found` (404) | 그 주문번호로 승인된 결제 없음 | 승인 없음. 단 막 호출한 직후라면 지연 가능성이 있어 앱이 유예 시간을 정한다(미확인: 토스 쪽 반영 지연) |
+| `retry_later`(`FORBIDDEN_CONSECUTIVE_REQUEST`·429) / `uncertain`(5xx·타임아웃·형식 이상) | 조회 실패 | PENDING 유지, 잠시 뒤 재조회 |
+| `fatal` (401·403 등) | 키·권한 | 알림 |
+조회 응답 DONE 의 `totalAmount` 는 최초 결제 금액이며 취소돼도 변하지 않는다(shipping 점검표 기준).
+
+### 3.3 취소(cancel)
+| 토스 응답 | `kind` | 앱이 할 일 |
+|---|---|---|
+| 200, status CANCELED/PARTIAL_CANCELED | `canceled`(`alreadyCanceled:false`) | DB 취소 반영 |
+| 400 `ALREADY_CANCELED_PAYMENT`·`ALREADY_REFUND_PAYMENT` → 라이브러리가 `paymentKey` 조회, CANCELED 확인 | `canceled`(`alreadyCanceled:true`) | 성공 취급, **DB 정리는 앱**(PG 는 취소·DB 는 PAID 인 불일치 해소) |
+| 위 두 코드인데 조회로 CANCELED 확인 못 함 | `uncertain` | 사람이 확인 |
+| 400 `ALREADY_REFUNDING_PAYMENT`, 409 `IDEMPOTENT_REQUEST_PROCESSING` | `processing` | 잠시 뒤 조회 |
+| 403 `FORBIDDEN_CONSECUTIVE_REQUEST`, 429 | `retry_later` | 잠시 뒤 **같은 키로** 재시도 |
+| 400 `PROVIDER_ERROR`, 5xx, 타임아웃, 네트워크, 응답 상태 이상, 모르는 코드(`CARD_PROCESSING_ERROR` 포함) | `uncertain` | 같은 키 유지, 조회(`getPayment`)로 확정 후 필요하면 같은 키로 재시도 |
+| 403 `NOT_CANCELABLE_PAYMENT`·`NOT_CANCELABLE_AMOUNT`·`NOT_CANCELABLE_PAYMENT_FOR_DORMANT_USER`·`EXCEED_MAX_REFUND_DUE` | `not_cancelable` | 재시도 금지, 사람이 처리(API 밖 환불 등) |
+| 401 `UNAUTHORIZED_KEY`, 403 `FORBIDDEN_REQUEST` | `fatal` | 알림 |
+
+### 3.4 failUrl(결제창 실패 리다이렉트) `?code=`
+`PAY_PROCESS_CANCELED`→`user_canceled`(구매자 취소, **orderId 가 없을 수 있음**), `PAY_PROCESS_ABORTED`→`aborted`, `REJECT_CARD_COMPANY`→`card_rejected`, 그 외→`other`. failUrl 은 승인 호출 전이므로 결제는 일어나지 않았다: 앱 상태는 재시도 가능하게 둘지 실패로 할지 앱이 정한다.
+
+## 4. 멱등키(Idempotency-Key) 규칙
+- 헤더 `Idempotency-Key`, 최대 300자, 첫 요청부터 15일 유효. (키+API키+URL+메서드)가 같으면 첫 응답을 돌려줌(문서). GET 에는 무시됨. 409 `IDEMPOTENT_REQUEST_PROCESSING` = 첫 요청 처리 중.
+- **에러가 나도 키를 바꿔 재시도하지 않는다.** 원인을 조회로 확인한 뒤 같은 키로 보낸다.
+- **confirm 키 = 주문번호 + paymentKey 조합**: `confirmIdempotencyKey(orderId, paymentKey)` = `confirm_<orderId>_<paymentKey>`. 같은 주문번호로 새 결제창을 열어 새 paymentKey 가 생기면 새 키가 되어 이전 시도의 캐시 응답이 재사용되지 않는다. 재시도·새로고침 때는 같은 paymentKey 라 같은 키. (paymentKey 가 길어 300자를 넘으면 throw — 실제 길이는 미확인, 보통 약 40~200자 추정이나 단정 못 함.)
+- **cancel 키**: 호출자가 반드시 넘긴다. `cancelIdempotencyKey({paymentKey, cancelAmount, alreadyCanceledTotal})` = `cancel_<paymentKey>_<기취소합계>_<금액|full>`. 같은 취소 요청이면 같은 키, 부분취소가 반복돼도 기취소 합계가 달라 구분된다.
+- 키 문자는 보이는 ASCII(`!`~`~`)만 허용(우리 쪽 안전 제약; 토스 문서의 문자 제한은 미확인).
+- 키는 로그에 남겨도 비밀이 아니지만 시크릿키·Authorization 헤더는 절대 로그에 남기지 않는다.
+
+## 5. 앱이 DB 에 반영할 때 지킬 규칙
+1. **불확실(`uncertain`·`processing`·`already_done`·`approved_mismatch`)은 FAILED 로 확정하지 않는다.** PENDING(또는 pending 테이블 행)을 유지하고 `getPaymentByOrderId` → `interpretPayment` 로 확정한다. FAILED 로 한 번 굳으면 승인이 실제로 됐어도 되살릴 수 없다(shipping 점검표 P1).
+2. 완료 반영 조건은 (a) `confirm.success` 또는 (b) 조회 `paid` 이며 **orderId·금액이 앱이 DB 에서 가져온 값과 일치**할 때뿐이다. 클라이언트가 준 amount 는 신뢰하지 않는다.
+3. 같은 주문의 두 번째 요청(연타·새로고침)은 `processing`/`already_done` 으로 온다 — 실패로 보지 말고 조회로 수렴시킨다.
+4. 승인 후 DB 반영이 실패하면 PENDING 이 남는다 → 앱의 정합 크론이 PENDING 을 조회로 확정한다(라이브러리는 크론을 제공하지 않음). PENDING 을 FAILED/취소로 만들기 전에 반드시 조회.
+5. 취소: 같은 취소 건엔 같은 멱등키. `canceled(alreadyCanceled)` 도 성공으로 DB 를 정리. `retry_later` 는 재시도, `not_cancelable` 은 재시도 금지.
+6. `approved_mismatch` 는 "돈은 승인됐다": 자동으로 무시 금지. 취소 호출은 앱이 결정하고 사람이 확인한다.
+7. 로그에 시크릿키·카드 정보 금지. 오류 메시지는 토스 `message` 를 300자까지만 담아 돌려준다(사용자 화면에 그대로 노출할지는 앱이 결정).
+
+## 6. 소비 앱 요구사항
+### shipping(shipping-prj, 요구 5건 — 대장 전달, 2026-10-16)
+1. 게이트웨이 인터페이스에 `lookupByOrderId` 포함 → `createTossClient` 가 `confirm`·`lookupByOrderId`·`lookup`·`cancel` 을 제공. (shipping 의 `PaymentGateway`/`NotConfiguredGateway`(키 없을 때 fail-closed)는 앱에 남기고 어댑터만 이 모듈로 교체하면 된다.)
+2. confirm 멱등키 = 주문번호+paymentKey 조합, 300자 이하 → `confirmIdempotencyKey`(§4).
+3. 오류 3분류 → §3.1·§3.2. 조회 판정: DONE+orderId·금액 일치=승인, ABORTED·EXPIRED·CANCELED=확정 실패, NOT_FOUND=승인 없음. 실제 코드명 사용(`REJECT_CARD_PAYMENT`).
+4. 취소 3종 → §3.3(`ALREADY_*`는 조회 확인 후 성공, `FORBIDDEN_CONSECUTIVE_REQUEST`는 재시도).
+5. 200 이지만 금액·주문번호 불일치 → `approved_mismatch`, 취소 호출 여부는 앱이 결정(§3.1).
+- 주의: 이 5건 중 shipping 최신 커밋(`fix/payment-uncertain-states`, a3175be)의 `gateway.ts`·`toss.ts`·`service.ts` 를 이 초안 작성 중에 다시 읽지 못했다(작업 격리 제한). 소비 시 `Failure{code,message}` 형태의 기존 반환과 이 라이브러리의 `kind` 반환 사이의 어댑터는 shipping 담당이 맞춘다.
+### meatpartners(wholesale 폴더, 결제 코드 `lib/payments/tosspayments-client.ts`·`pg-reconcile.ts`)
+- **pending 테이블 방식을 유지**한다(라이브러리는 DB 모델을 모른다). 이 모듈은 현재 `confirmPayment`/`getPaymentByOrderId`/`cancelPayment` 의 호출·오류 해석만 대체한다.
+- 현재 코드는 예외(`TossPaymentsError{code}`)를 던지는 방식, 이 모듈은 값(`kind`)을 반환 → 호출부를 `switch(kind)` 로 바꿔야 한다. 기존 `getPaymentByOrderId` 의 404→`null` 은 `not_found`.
+- 기존에 없던 것: 승인·취소 `Idempotency-Key`, 승인 응답 `status===DONE`·금액 검증(현재는 호출부가 함), 조회 후 확정 규칙. 대조 크론은 `uncertain/processing` 을 만났을 때 PENDING 유지.
+- **결제창 SDK 는 2단계**(이 모듈에 없음). 현재 SDK 를 그대로 쓴다.
+- 취소는 현재 전액(`cancelAmount` 생략)만 쓴다 → 그대로 호환, 부분취소는 선택.
+### 공통
+- 앱 package.json 에 platform-shared 새 버전을 올릴 때 두 앱을 같이 올린다(README 규칙). 아직 버전·태그 없음.
+- 앱 시험에서는 `fetch` 를 주입(`cfg.fetch`)해 모의한다.
+
+## 7. 미확인 항목
+- 공식 문서에 `IDEMPOTENT_REQUEST_PROCESSING` 은 멱등키 페이지에만 있고 에러 코드 페이지에는 없다(대신 `ALREADY_PROCESSING_REQUEST` 400). 둘 다 `processing` 으로 처리.
+- 승인 유효 시간: 승인 API 문서 10분 vs Payment 객체 `EXPIRED` 설명 30분(shipping 점검표 인용, 이번에 재확인 안 함).
+- `FORBIDDEN_CONSECUTIVE_REQUEST` 가 confirm 에서 오는지: 문서는 조회·취소에만 기재 → confirm 에서는 모르는 코드로 보아 `uncertain`.
+- 429 의 실제 발생·재시도 정책, 승인 직후 주문번호 조회의 반영 지연, paymentKey 최대 길이, 멱등키 허용 문자.
+- 웹훅(`PAYMENT_STATUS_CHANGED`)은 범위 밖. 서명 검증 방법이 문서에 없다(shipping 점검표).
+- 에러 코드 페이지 전체 목록 중 이번에 분류한 것 외의 코드(가상계좌·자동결제 전용 등)는 모두 `uncertain`(승인) 쪽으로 떨어진다 — 더 정확히 하려면 코드 추가 필요.
+- 모든 동작은 fetch 모의로만 검증, 실제 토스 호출·테스트 키 검증 없음.
