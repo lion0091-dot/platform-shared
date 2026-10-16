@@ -113,7 +113,7 @@ export async function confirmPayment(cfg: TossConfig, input: ConfirmInput): Prom
       case "processing":
         return { kind: "processing", code: r.code };
       case "session_expired":
-        return { kind: "session_expired", code: r.code };
+        return { kind: "session_expired", code: r.code, message: r.message };
       case "uncertain":
       case "retry_later":
         return { kind: "uncertain", code: r.code, message: r.message };

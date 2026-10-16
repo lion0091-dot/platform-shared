@@ -37,6 +37,9 @@ export const DEFINITE_FAILURE: ReadonlySet<string> = new Set([
   "INVALID_CARD_NUMBER",
   "INVALID_CARD_INSTALLMENT_PLAN",
   "NOT_SUPPORTED_INSTALLMENT_PLAN_CARD_OR_MERCHANT",
+  // 결제 승인 섹션(공식 에러 코드 페이지 2026-10-16 열람, 400): 할부 개월 초과·할부 미지원 카드
+  "EXCEED_MAX_CARD_INSTALLMENT_PLAN",
+  "NOT_SUPPORTED_MONTHLY_INSTALLMENT_PLAN",
 ]);
 
 /** 토스 오류(HTTP 상태 + code) → 분류. 순수 함수. 분류표는 docs/payments-api-draft.md. */

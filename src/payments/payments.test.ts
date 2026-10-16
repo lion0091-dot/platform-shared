@@ -129,13 +129,27 @@ describe("confirm 분류표", () => {
     expect(r).toMatchObject({ kind: "uncertain", code: "TIMEOUT" });
   });
 
-  it.each(["UNAUTHORIZED_KEY", "FORBIDDEN_REQUEST", "REJECT_CARD_COMPANY", "REJECT_CARD_PAYMENT", "REJECT_ACCOUNT_PAYMENT", "INVALID_REJECT_CARD", "INVALID_REQUEST", "INVALID_API_KEY", "NOT_FOUND_PAYMENT"])("fatal(분명한 실패): %s", async (c) => {
+  it.each(["UNAUTHORIZED_KEY", "FORBIDDEN_REQUEST", "REJECT_CARD_COMPANY", "REJECT_CARD_PAYMENT", "REJECT_ACCOUNT_PAYMENT", "INVALID_REJECT_CARD", "INVALID_REQUEST", "INVALID_API_KEY", "NOT_FOUND_PAYMENT", "INVALID_CARD_EXPIRATION", "INVALID_STOPPED_CARD", "INVALID_CARD_NUMBER", "EXCEED_MAX_CARD_INSTALLMENT_PLAN", "NOT_SUPPORTED_MONTHLY_INSTALLMENT_PLAN"])("fatal(분명한 실패): %s", async (c) => {
     const s = c === "UNAUTHORIZED_KEY" ? 401 : c === "NOT_FOUND_PAYMENT" ? 404 : c.startsWith("INVALID_") ? 400 : 403;
     expect(await confirm(mk(err(s, c)))).toMatchObject({ kind: "fatal", code: c });
   });
 
   it("session_expired: NOT_FOUND_PAYMENT_SESSION", async () => {
-    expect(await confirm(mk(err(404, "NOT_FOUND_PAYMENT_SESSION")))).toEqual({ kind: "session_expired", code: "NOT_FOUND_PAYMENT_SESSION" });
+    expect(await confirm(mk(err(404, "NOT_FOUND_PAYMENT_SESSION")))).toEqual({ kind: "session_expired", code: "NOT_FOUND_PAYMENT_SESSION", message: "msg NOT_FOUND_PAYMENT_SESSION" });
+  });
+
+  it("토스 한글 message 를 fatal·session_expired 결과에 그대로 담는다", async () => {
+    const k = (c: string, s: number, message: string) => resp({ code: c, message }, s);
+
+    expect(await confirm(mk(k("INVALID_CARD_EXPIRATION", 400, "카드 정보를 다시 확인해주세요. (유효기간)")))).toEqual({ kind: "fatal", code: "INVALID_CARD_EXPIRATION", message: "카드 정보를 다시 확인해주세요. (유효기간)" });
+    expect(await confirm(mk(k("NOT_FOUND_PAYMENT_SESSION", 404, "결제 시간이 만료되어 결제 승인에 실패하였습니다.")))).toMatchObject({ kind: "session_expired", message: "결제 시간이 만료되어 결제 승인에 실패하였습니다." });
+  });
+
+  it("404 구분: 승인 SESSION=session_expired, 승인 PAYMENT=fatal, 조회 PAYMENT=not_found", async () => {
+    expect((await confirm(mk(err(404, "NOT_FOUND_PAYMENT_SESSION")))).kind).toBe("session_expired");
+    expect((await confirm(mk(err(404, "NOT_FOUND_PAYMENT")))).kind).toBe("fatal");
+    expect((await getPaymentByOrderId(cfgOf(mk(err(404, "NOT_FOUND_PAYMENT"))), OID)).kind).toBe("not_found");
+    expect((await getPaymentByOrderId(cfgOf(mk(err(404, "NOT_FOUND_PAYMENT_SESSION"))), OID)).kind).toBe("not_found");
   });
 
   it("잘못된 입력은 호출 전에 던진다(금액·키)", async () => {

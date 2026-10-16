@@ -61,7 +61,7 @@ export type ConfirmOutcome =
   | { kind: "uncertain"; code: string; message: string }
   | { kind: "processing"; code: string }
   | { kind: "fatal"; code: string; message: string }
-  | { kind: "session_expired"; code: string }
+  | { kind: "session_expired"; code: string; message?: string }
   | { kind: "approved_mismatch"; reason: ConfirmMismatchReason; payment: TossPayment };
 
 /**
