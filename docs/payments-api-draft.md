@@ -25,7 +25,9 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 | `isValidOrderId` / `assertOrderId` / `generateOrderId(prefix?)` | | 영문·숫자·`-`·`_` 6~64자. 생성은 prefix+UUID |
 | `confirmIdempotencyKey(orderId, paymentKey)` / `cancelIdempotencyKey({paymentKey, cancelAmount?, alreadyCanceledTotal?})` | | 문자열(300자 이하 보장, 넘으면 throw) |
 
-`TossPayment = {paymentKey, orderId, status(토스 원문), totalAmount, method, approvedAt}`.
+`TossPayment = {paymentKey, orderId, status(토스 원문), totalAmount, method, approvedAt, balanceAmount(취소 가능 잔액, 없으면 null), cancels[]}`. `cancels` 항목은 `{cancelAmount, cancelReason, canceledAt, transactionKey, cancelStatus(DONE=성공)}`(Payment 객체의 `cancels`, null 이면 빈 배열). `canceled(alreadyCanceled:true)` 일 때 앱은 "토스에서 이미 취소된 금액"을 `cancels` 의 `cancelAmount` 합(또는 `totalAmount - balanceAmount`)으로 알 수 있다 — 앱 DB 와 대조해 정리.
+
+입력 검증(호출 전 throw): `confirmPayment`·`getPaymentByOrderId` 는 orderId 가 영문·숫자·`-`·`_` 6~64자가 아니면 `INVALID_ORDER_ID`(uuid 36자는 통과). 외부 호출은 나가지 않는다.
 
 ## 3. 오류 분류표
 
@@ -35,13 +37,13 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 | 토스 응답 | `kind` | 3분류 | 앱이 할 일 |
 |---|---|---|---|
 | 200, status=DONE, orderId·paymentKey 일치, totalAmount=기대 금액 | `success` | 승인 | 결제 완료 반영 |
-| 200 인데 orderId/paymentKey 불일치 또는 totalAmount≠기대 금액 | `approved_mismatch`(`reason`) | **토스에선 승인된 상태** | PG 취소 연계가 필요: 앱이 `cancelPayment` 호출 여부 결정, 주문은 완료로 반영하지 말고 사람이 확인 |
-| 200 인데 status≠DONE 또는 형식 이상 | `uncertain`(`STATUS_x`/`BAD_RESPONSE`) | 불확실 | PENDING 유지, 조회 |
+| 200, **status=DONE** 인데 orderId/paymentKey 불일치 또는 totalAmount≠기대 금액 (검사 순서: status → 주문·키 → 금액) | `approved_mismatch`(`reason`) | **토스에선 승인된 상태** | PG 취소 연계가 필요: 앱이 `cancelPayment` 호출 여부 결정, 주문은 완료로 반영하지 말고 사람이 확인 |
+| 200 인데 status≠DONE(IN_PROGRESS 등, 주문·금액이 달라도 불일치로 단정하지 않음) 또는 형식 이상 | `uncertain`(`STATUS_x`/`BAD_RESPONSE`) | 불확실 | PENDING 유지, 조회 |
 | 400 `ALREADY_PROCESSED_PAYMENT` | `already_done` | 조회로 확정 | `getPaymentByOrderId` → `interpretPayment`=paid 면 완료 반영(주문·금액 일치 때만) |
 | 409 `IDEMPOTENT_REQUEST_PROCESSING`, 400 `ALREADY_PROCESSING_REQUEST` | `processing` | 불확실 | PENDING 유지, 잠시 뒤 조회(또는 같은 키로 재호출). **FAILED 금지** |
 | 400 `PROVIDER_ERROR`, 500 `FAILED_INTERNAL_SYSTEM_PROCESSING`·`FAILED_PAYMENT_INTERNAL_SYSTEM_PROCESSING`, 5xx 전부, 429, 타임아웃(`TIMEOUT`), 네트워크(`NETWORK`), **목록에 없는 모든 코드**, `CARD_PROCESSING_ERROR` | `uncertain` | 불확실 | PENDING 유지, 조회로 확정. **FAILED 확정 금지** |
 | 404 `NOT_FOUND_PAYMENT_SESSION` | `session_expired` | 분명한 실패(세션 만료) | 새 결제창으로 다시 시작(새 paymentKey) |
-| 401 `UNAUTHORIZED_KEY`, 403 `FORBIDDEN_REQUEST`, 404 `NOT_FOUND_PAYMENT` | `fatal` | 분명한 실패 | 즉시 실패. 키 오류는 운영 알림 필요 |
+| 401 `UNAUTHORIZED_KEY`, 400 `INVALID_API_KEY`(시크릿키 오류), 403 `FORBIDDEN_REQUEST`, 404 `NOT_FOUND_PAYMENT`, 400 `INVALID_REQUEST`(잘못된 요청) | `fatal` | 분명한 실패 | 즉시 실패. 키 오류는 운영 알림 필요, `INVALID_REQUEST` 는 요청 값(주문번호·금액 등) 점검 |
 | 403 `REJECT_CARD_COMPANY`(승인 거절)·`REJECT_CARD_PAYMENT`(한도초과·잔액부족)·`REJECT_ACCOUNT_PAYMENT`·`REJECT_TOSSPAY_INVALID_ACCOUNT`, 400 `INVALID_REJECT_CARD`·`INVALID_CARD_EXPIRATION`·`INVALID_STOPPED_CARD`·`INVALID_CARD_LOST_OR_STOLEN`·`INVALID_CARD_NUMBER`·`INVALID_CARD_INSTALLMENT_PLAN`·`NOT_SUPPORTED_INSTALLMENT_PLAN_CARD_OR_MERCHANT` | `fatal` | 분명한 실패 | 즉시 실패 + 사용자 안내(다른 카드/수단). 코드 목록은 `DEFINITE_FAILURE` |
 
 참고: shipping 의 가짜 코드 `REJECT_CARD` 는 없다. 실제 코드는 `REJECT_CARD_PAYMENT`·`REJECT_CARD_COMPANY` 다(`REJECT_CARD_PAYMENT` 는 승인 API 섹션에만 있고 "전체 에러 목록"에는 없음 — 문서 내부 차이).
@@ -98,6 +100,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 3. 오류 3분류 → §3.1·§3.2. 조회 판정: DONE+orderId·금액 일치=승인, ABORTED·EXPIRED·CANCELED=확정 실패, NOT_FOUND=승인 없음. 실제 코드명 사용(`REJECT_CARD_PAYMENT`).
 4. 취소 3종 → §3.3(`ALREADY_*`는 조회 확인 후 성공, `FORBIDDEN_CONSECUTIVE_REQUEST`는 재시도).
 5. 200 이지만 금액·주문번호 불일치 → `approved_mismatch`, 취소 호출 여부는 앱이 결정(§3.1).
+- 후속 검토 반영(2026-10-16): `INVALID_REQUEST`→fatal(R1), `TossPayment` 에 `balanceAmount`·`cancels`(R2), confirm 검증 순서 status 먼저(R3), confirm·lookup orderId 형식 사전 검증(R5). `approved_mismatch` 후속(취소 연계)은 앱 몫(R4).
 - 주의: 이 5건 중 shipping 최신 커밋(`fix/payment-uncertain-states`, a3175be)의 `gateway.ts`·`toss.ts`·`service.ts` 를 이 초안 작성 중에 다시 읽지 못했다(작업 격리 제한). 소비 시 `Failure{code,message}` 형태의 기존 반환과 이 라이브러리의 `kind` 반환 사이의 어댑터는 shipping 담당이 맞춘다.
 ### meatpartners(wholesale 폴더, 결제 코드 `lib/payments/tosspayments-client.ts`·`pg-reconcile.ts`)
 - **pending 테이블 방식을 유지**한다(라이브러리는 DB 모델을 모른다). 이 모듈은 현재 `confirmPayment`/`getPaymentByOrderId`/`cancelPayment` 의 호출·오류 해석만 대체한다.
@@ -116,4 +119,6 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - 429 의 실제 발생·재시도 정책, 승인 직후 주문번호 조회의 반영 지연, paymentKey 최대 길이, 멱등키 허용 문자.
 - 웹훅(`PAYMENT_STATUS_CHANGED`)은 범위 밖. 서명 검증 방법이 문서에 없다(shipping 점검표).
 - 에러 코드 페이지 전체 목록 중 이번에 분류한 것 외의 코드(가상계좌·자동결제 전용 등)는 모두 `uncertain`(승인) 쪽으로 떨어진다 — 더 정확히 하려면 코드 추가 필요.
+- `INVALID_REQUEST`(400)는 에러 코드 페이지의 결제 승인 섹션에서 확인(메시지: 잘못된 요청). 다만 "결제가 일어나지 않았다"는 보장은 문서에 명시돼 있지 않다 — 400 계열이라 거절로 보고 fatal 에 넣었다(판단). 페이지가 일부 잘렸을 수 있어(열람 도구 표시) 다른 코드가 빠졌을 수 있음.
+- `balanceAmount`·`cancels` 필드명·타입은 토스 reference 페이지(Payment 객체)에서 확인: `balanceAmount` number, `cancels` nullable array(`cancelAmount`·`cancelReason`·`canceledAt`·`transactionKey`·`cancelStatus` 등). 전용 payment-object 주소는 404 였고 reference 메인에서 확인.
 - 모든 동작은 fetch 모의로만 검증, 실제 토스 호출·테스트 키 검증 없음.

@@ -61,10 +61,10 @@ describe("인증·요청 형식", () => {
 
   it("조회는 GET 이고 Idempotency-Key 를 보내지 않는다", async () => {
     const m = mk(resp(pay()), resp(pay()));
-    await getPaymentByOrderId(cfgOf(m), "order/한글 1");
+    await getPaymentByOrderId(cfgOf(m), "3f2b8c1e-aaaa-4bbb-8ccc-0123456789ab");
     await getPayment(cfgOf(m), PK);
 
-    expect(m.f.mock.calls[0]![0]).toBe(`https://api.tosspayments.com/v1/payments/orders/${encodeURIComponent("order/한글 1")}`);
+    expect(m.f.mock.calls[0]![0]).toBe("https://api.tosspayments.com/v1/payments/orders/3f2b8c1e-aaaa-4bbb-8ccc-0123456789ab");
     expect(m.f.mock.calls[1]![0]).toBe(`https://api.tosspayments.com/v1/payments/${PK}`);
     expect(callInit(m).method).toBe("GET");
     expect((callInit(m).headers as Record<string, string>)["Idempotency-Key"]).toBeUndefined();
@@ -129,8 +129,8 @@ describe("confirm 분류표", () => {
     expect(r).toMatchObject({ kind: "uncertain", code: "TIMEOUT" });
   });
 
-  it.each(["UNAUTHORIZED_KEY", "FORBIDDEN_REQUEST", "REJECT_CARD_COMPANY", "REJECT_CARD_PAYMENT", "REJECT_ACCOUNT_PAYMENT", "INVALID_REJECT_CARD", "NOT_FOUND_PAYMENT"])("fatal(분명한 실패): %s", async (c) => {
-    const s = c === "UNAUTHORIZED_KEY" ? 401 : c === "NOT_FOUND_PAYMENT" ? 404 : c === "INVALID_REJECT_CARD" ? 400 : 403;
+  it.each(["UNAUTHORIZED_KEY", "FORBIDDEN_REQUEST", "REJECT_CARD_COMPANY", "REJECT_CARD_PAYMENT", "REJECT_ACCOUNT_PAYMENT", "INVALID_REJECT_CARD", "INVALID_REQUEST", "INVALID_API_KEY", "NOT_FOUND_PAYMENT"])("fatal(분명한 실패): %s", async (c) => {
+    const s = c === "UNAUTHORIZED_KEY" ? 401 : c === "NOT_FOUND_PAYMENT" ? 404 : c.startsWith("INVALID_") ? 400 : 403;
     expect(await confirm(mk(err(s, c)))).toMatchObject({ kind: "fatal", code: c });
   });
 
@@ -241,6 +241,50 @@ describe("cancel 분류표", () => {
     await cancel(m);
 
     expect((callInit(m).headers as Record<string, string>)["Idempotency-Key"]).toBe(`cancel_${PK}_0_full`);
+  });
+});
+
+describe("검증 순서·orderId·취소 이력", () => {
+  it("status 가 DONE 이 아니면 주문·금액이 달라도 approved_mismatch 가 아니라 uncertain", async () => {
+    expect(await confirm(mk(resp(pay({ status: "IN_PROGRESS", orderId: "other-order-1" }))))).toMatchObject({ kind: "uncertain", code: "STATUS_IN_PROGRESS" });
+    expect(await confirm(mk(resp(pay({ status: "IN_PROGRESS", totalAmount: 1 }))))).toMatchObject({ kind: "uncertain" });
+  });
+
+  it("DONE 일 때만 불일치를 approved_mismatch 로", async () => {
+    expect(await confirm(mk(resp(pay({ status: "DONE", totalAmount: 1 }))))).toMatchObject({ kind: "approved_mismatch", reason: "AMOUNT_MISMATCH" });
+  });
+
+  it("형식이 틀린 orderId 는 외부 호출 전에 던진다, uuid(36자)는 통과", async () => {
+    const m = mk(resp(pay()));
+    await expect(confirmPayment(cfgOf(m), { paymentKey: PK, orderId: "abc", amount: 100 })).rejects.toThrow("INVALID_ORDER_ID");
+    await expect(getPaymentByOrderId(cfgOf(m), "bad id/1")).rejects.toThrow("INVALID_ORDER_ID");
+    expect(m.f).not.toHaveBeenCalled();
+
+    const uuid = "3f2b8c1e-aaaa-4bbb-8ccc-0123456789ab";
+    const ok = mk(resp(pay({ orderId: uuid })));
+
+    expect((await confirmPayment(cfgOf(ok), { paymentKey: PK, orderId: uuid, amount: 10000 })).kind).toBe("success");
+  });
+
+  it("balanceAmount·cancels 매핑(없으면 null/빈 배열), 이미 취소 시 취소 금액을 알 수 있다", async () => {
+    const cancels = [{ cancelAmount: 4000, cancelReason: "부분", canceledAt: "2026-10-16T11:00:00+09:00", transactionKey: "tx1", cancelStatus: "DONE", taxFreeAmount: 0 }];
+    const m = mk(resp(pay()), err(400, "ALREADY_CANCELED_PAYMENT"), resp(pay({ status: "CANCELED", balanceAmount: 0, cancels: [{ ...cancels[0], cancelAmount: 10000 }] })), resp(pay({ cancels: null })));
+    const first = await getPayment(cfgOf(m), PK);
+
+    expect(first.kind === "found" && first.payment.balanceAmount).toBeNull();
+    expect(first.kind === "found" && first.payment.cancels).toEqual([]);
+
+    const r = await cancelPayment(cfgOf(m), { paymentKey: PK, cancelReason: "x", idempotencyKey: "k1" });
+
+    expect(r).toMatchObject({ kind: "canceled", alreadyCanceled: true });
+    if (r.kind === "canceled") {
+      expect(r.payment.balanceAmount).toBe(0);
+      expect(r.payment.cancels).toEqual([{ cancelAmount: 10000, cancelReason: "부분", canceledAt: "2026-10-16T11:00:00+09:00", transactionKey: "tx1", cancelStatus: "DONE" }]);
+    }
+
+    const again = await getPayment(cfgOf(m), PK);
+
+    expect(again.kind === "found" && again.payment.cancels).toEqual([]);
   });
 });
 

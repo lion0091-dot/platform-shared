@@ -19,6 +19,20 @@ export interface TossPayment {
   totalAmount: number;
   method: string;
   approvedAt: string | null;
+  /** 취소 후 남은 취소 가능 금액(Payment.balanceAmount). 응답에 없으면 null */
+  balanceAmount: number | null;
+  /** 취소 이력(Payment.cancels, null 이면 빈 배열). 이미 취소된 금액 = totalAmount - balanceAmount 또는 cancels 의 cancelAmount 합 */
+  cancels: TossCancel[];
+}
+
+/** Payment.cancels 항목 중 쓰는 최소 필드 */
+export interface TossCancel {
+  cancelAmount: number;
+  cancelReason: string;
+  canceledAt: string | null;
+  transactionKey: string | null;
+  /** 문서: DONE 이면 취소 성공 */
+  cancelStatus: string | null;
 }
 
 export interface ConfirmInput {

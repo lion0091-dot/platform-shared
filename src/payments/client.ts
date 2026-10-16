@@ -1,6 +1,7 @@
 import { classifyTossError } from "./classify";
 import { assertIdempotencyKey, confirmIdempotencyKey } from "./idempotency";
-import type { CancelInput, CancelOutcome, ConfirmInput, ConfirmOutcome, LookupOutcome, TossConfig, TossPayment } from "./types";
+import { assertOrderId } from "./orderId";
+import type { CancelInput,CancelOutcome, ConfirmInput, ConfirmOutcome, LookupOutcome, TossCancel, TossConfig, TossPayment } from "./types";
 
 const BASE_URL = "https://api.tosspayments.com";
 export const TOSS_TIMEOUT_MS = 15_000;
@@ -64,6 +65,18 @@ const NET_MSG = "결제 서버 응답을 받지 못했습니다(결과 불명)."
 function toPayment(b: Record<string, unknown>): TossPayment | null {
   if (typeof b.paymentKey !== "string" || typeof b.orderId !== "string" || typeof b.status !== "string" || typeof b.totalAmount !== "number") return null;
 
+  const cancels: TossCancel[] = Array.isArray(b.cancels)
+    ? b.cancels
+        .filter((c): c is Record<string, unknown> => !!c && typeof c === "object" && typeof (c as Record<string, unknown>).cancelAmount === "number")
+        .map((c) => ({
+          cancelAmount: c.cancelAmount as number,
+          cancelReason: typeof c.cancelReason === "string" ? c.cancelReason : "",
+          canceledAt: typeof c.canceledAt === "string" ? c.canceledAt : null,
+          transactionKey: typeof c.transactionKey === "string" ? c.transactionKey : null,
+          cancelStatus: typeof c.cancelStatus === "string" ? c.cancelStatus : null,
+        }))
+    : [];
+
   return {
     paymentKey: b.paymentKey,
     orderId: b.orderId,
@@ -71,6 +84,8 @@ function toPayment(b: Record<string, unknown>): TossPayment | null {
     totalAmount: b.totalAmount,
     method: typeof b.method === "string" ? b.method : "",
     approvedAt: typeof b.approvedAt === "string" ? b.approvedAt : null,
+    balanceAmount: typeof b.balanceAmount === "number" ? b.balanceAmount : null,
+    cancels,
   };
 }
 
@@ -79,6 +94,8 @@ export async function confirmPayment(cfg: TossConfig, input: ConfirmInput): Prom
   const key = assertIdempotencyKey(input.idempotencyKey ?? confirmIdempotencyKey(input.orderId, input.paymentKey));
 
   if (!Number.isSafeInteger(input.amount) || input.amount <= 0) throw new Error("INVALID_AMOUNT: 기대 금액은 양의 정수(원)여야 한다.");
+
+  assertOrderId(input.orderId);
 
   const r = await call(cfg, "POST", "/v1/payments/confirm", {
     idempotencyKey: key,
@@ -108,8 +125,9 @@ export async function confirmPayment(cfg: TossConfig, input: ConfirmInput): Prom
   const p = toPayment(r.body);
 
   if (!p) return { kind: "uncertain", code: "BAD_RESPONSE", message: "승인 응답 형식이 올바르지 않습니다." };
-  if (p.orderId !== input.orderId || p.paymentKey !== input.paymentKey) return { kind: "approved_mismatch", reason: "ORDER_MISMATCH", payment: p };
+  // 상태를 먼저: DONE 이 아니면(IN_PROGRESS 등) 승인됐다고 단정할 수 없으니 불일치로 보지 않고 불확실(조회로 확정)
   if (p.status !== "DONE") return { kind: "uncertain", code: `STATUS_${p.status}`, message: "승인 응답의 상태가 DONE 이 아닙니다." };
+  if (p.orderId !== input.orderId || p.paymentKey !== input.paymentKey) return { kind: "approved_mismatch", reason: "ORDER_MISMATCH", payment: p };
   if (p.totalAmount !== input.amount) return { kind: "approved_mismatch", reason: "AMOUNT_MISMATCH", payment: p };
 
   return { kind: "success", payment: p };
@@ -136,8 +154,8 @@ async function lookup(cfg: TossConfig, path: string): Promise<LookupOutcome> {
 }
 
 /** 주문번호로 조회 GET /v1/payments/orders/{orderId} — paymentKey 를 모를 때(승인 응답을 못 받았을 때)의 복구 수단 */
-export function getPaymentByOrderId(cfg: TossConfig, orderId: string): Promise<LookupOutcome> {
-  return lookup(cfg, `/v1/payments/orders/${encodeURIComponent(orderId)}`);
+export async function getPaymentByOrderId(cfg: TossConfig, orderId: string): Promise<LookupOutcome> {
+  return lookup(cfg, `/v1/payments/orders/${encodeURIComponent(assertOrderId(orderId))}`);
 }
 
 /** paymentKey 로 조회 GET /v1/payments/{paymentKey} */
