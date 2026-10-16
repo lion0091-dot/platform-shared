@@ -188,11 +188,11 @@ describe("cancel 분류표", () => {
   const cancel = (m: ReturnType<typeof mk>, extra = {}) => cancelPayment(cfgOf(m), { paymentKey: PK, cancelReason: "고객 요청", idempotencyKey: cancelIdempotencyKey({ paymentKey: PK }), ...extra });
 
   it("canceled: 응답 status CANCELED, 본문에 cancelReason 만(전액)·부분은 cancelAmount 포함", async () => {
-    const m = mk(resp(pay({ status: "CANCELED" })), resp(pay({ status: "PARTIAL_CANCELED" })));
+    const m = mk(resp(pay({ status: "CANCELED" })), resp(pay({ status: "PARTIAL_CANCELED", balanceAmount: 7000, cancels: [{ cancelAmount: 3000 }] })));
 
     expect(await cancel(m)).toMatchObject({ kind: "canceled", alreadyCanceled: false });
     expect(JSON.parse(callInit(m, 0).body as string)).toEqual({ cancelReason: "고객 요청" });
-    expect(await cancel(m, { cancelAmount: 3000 })).toMatchObject({ kind: "canceled" });
+    expect(await cancel(m, { cancelAmount: 3000, alreadyCanceledTotal: 0 })).toMatchObject({ kind: "canceled" });
     expect(JSON.parse(callInit(m, 1).body as string)).toEqual({ cancelReason: "고객 요청", cancelAmount: 3000 });
     expect(m.f.mock.calls[0]![0]).toBe(`https://api.tosspayments.com/v1/payments/${PK}/cancel`);
   });
@@ -240,7 +240,7 @@ describe("cancel 분류표", () => {
     await expect(cancel(m, { cancelAmount: -1 })).rejects.toThrow("INVALID_AMOUNT");
     await cancel(m);
 
-    expect((callInit(m).headers as Record<string, string>)["Idempotency-Key"]).toBe(`cancel_${PK}_0_full`);
+    expect((callInit(m).headers as Record<string, string>)["Idempotency-Key"]).toBe(`cancel_${PK}_full`);
   });
 });
 
@@ -285,6 +285,51 @@ describe("검증 순서·orderId·취소 이력", () => {
     const again = await getPayment(cfgOf(m), PK);
 
     expect(again.kind === "found" && again.payment.cancels).toEqual([]);
+  });
+});
+
+describe("부분 취소 멱등키·응답 검증", () => {
+  const partial = (m: ReturnType<typeof mk>, amount: number, total: number) =>
+    cancelPayment(cfgOf(m), { paymentKey: PK, cancelReason: "부분", cancelAmount: amount, alreadyCanceledTotal: total, idempotencyKey: cancelIdempotencyKey({ paymentKey: PK, cancelAmount: amount, alreadyCanceledTotal: total }) });
+  const after = (sum: number) => pay({ status: "PARTIAL_CANCELED", balanceAmount: 10000 - sum, cancels: [{ cancelAmount: sum }] });
+
+  it("부분 취소 키는 누계 없이는 만들 수 없다(던짐), 전액은 full", () => {
+    // @ts-expect-error 타입에서도 막힌다
+    expect(() => cancelIdempotencyKey({ paymentKey: PK, cancelAmount: 1000 })).toThrow("INVALID_CANCELED_TOTAL");
+    expect(() => cancelIdempotencyKey({ paymentKey: PK, cancelAmount: 1000, alreadyCanceledTotal: -1 })).toThrow("INVALID_CANCELED_TOTAL");
+    expect(cancelIdempotencyKey({ paymentKey: PK })).toBe(`cancel_${PK}_full`);
+  });
+
+  it("cancelPayment 도 부분 취소에 누계가 없으면 호출 전에 던진다", async () => {
+    const m = mk(resp(after(1000)));
+
+    await expect(cancelPayment(cfgOf(m), { paymentKey: PK, cancelReason: "x", cancelAmount: 1000, idempotencyKey: "k" })).rejects.toThrow("INVALID_CANCELED_TOTAL");
+    expect(m.f).not.toHaveBeenCalled();
+  });
+
+  it("정상 연속 부분 취소 2회: 같은 금액이어도 누계가 달라 키가 다르고 둘 다 canceled", async () => {
+    const m = mk(resp(after(1000)), resp(pay({ status: "PARTIAL_CANCELED", balanceAmount: 8000, cancels: [{ cancelAmount: 1000 }, { cancelAmount: 1000 }] })));
+
+    expect(await partial(m, 1000, 0)).toMatchObject({ kind: "canceled", alreadyCanceled: false });
+    expect(await partial(m, 1000, 1000)).toMatchObject({ kind: "canceled", alreadyCanceled: false });
+    expect((callInit(m, 0).headers as Record<string, string>)["Idempotency-Key"]).not.toBe((callInit(m, 1).headers as Record<string, string>)["Idempotency-Key"]);
+  });
+
+  it("같은 금액 두 번째 취소가 캐시된 첫 응답이면 CANCEL_NOT_APPLIED(uncertain)", async () => {
+    // 호출부가 누계를 갱신하지 못해 두 번째도 누계 0 으로 보냈지만 이번엔 앱이 1000 이라 알고 있는 상황: 응답은 여전히 누계 1000
+    const m = mk(resp(after(1000)));
+
+    expect(await partial(m, 1000, 1000)).toMatchObject({ kind: "uncertain", code: "CANCEL_NOT_APPLIED" });
+  });
+
+  it("누계를 확인할 정보(cancels·balanceAmount)가 응답에 없으면 uncertain", async () => {
+    expect(await partial(mk(resp(pay({ status: "PARTIAL_CANCELED" }))), 1000, 0)).toMatchObject({ kind: "uncertain", code: "CANCEL_NOT_APPLIED" });
+  });
+
+  it("전액 취소 요청인데 PARTIAL_CANCELED 응답이면 uncertain", async () => {
+    const m = mk(resp(pay({ status: "PARTIAL_CANCELED", balanceAmount: 5000, cancels: [{ cancelAmount: 5000 }] })));
+
+    expect(await cancelPayment(cfgOf(m), { paymentKey: PK, cancelReason: "x", idempotencyKey: cancelIdempotencyKey({ paymentKey: PK }) })).toMatchObject({ kind: "uncertain" });
   });
 });
 

@@ -20,7 +20,22 @@ export function confirmIdempotencyKey(orderId: string, paymentKey: string): stri
   return assertIdempotencyKey(`confirm_${orderId}_${paymentKey}`);
 }
 
-/** 취소 키: 같은 취소 요청(결제·기취소 합계·이번 금액)이면 같은 값. 금액 생략(전액)은 "full". */
-export function cancelIdempotencyKey(p: { paymentKey: string; cancelAmount?: number; alreadyCanceledTotal?: number }): string {
-  return assertIdempotencyKey(`cancel_${p.paymentKey}_${p.alreadyCanceledTotal ?? 0}_${p.cancelAmount ?? "full"}`);
+/**
+ * 취소 키: 같은 취소 요청이면 같은 값, 다른 취소 요청이면 다른 값.
+ *  - 전액 취소(cancelAmount 생략): `cancel_<paymentKey>_full`
+ *  - 부분 취소: cancelAmount 와 alreadyCanceledTotal(요청 직전 토스 기준 취소 누계, 원)을 **둘 다 필수**로 받는다.
+ *    누계를 빼면 같은 금액의 두 번째 부분 취소가 첫 번째와 같은 키가 되어 토스가 첫 응답을 돌려주고 실제 환불은 1회뿐이다.
+ *    그래서 누계가 없으면 던진다(타입 + 런타임).
+ */
+export type CancelKeyParts = { paymentKey: string; cancelAmount?: undefined } | { paymentKey: string; cancelAmount: number; alreadyCanceledTotal: number };
+
+export function cancelIdempotencyKey(p: CancelKeyParts): string {
+  if (p.cancelAmount === undefined) return assertIdempotencyKey(`cancel_${p.paymentKey}_full`);
+
+  const total = (p as { alreadyCanceledTotal?: unknown }).alreadyCanceledTotal;
+
+  if (!Number.isSafeInteger(p.cancelAmount) || p.cancelAmount <= 0) throw new Error("INVALID_AMOUNT: 취소 금액은 양의 정수(원)여야 한다.");
+  if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) throw new Error("INVALID_CANCELED_TOTAL: 부분 취소 키에는 요청 직전 취소 누계(alreadyCanceledTotal, 0 이상 정수)가 필수다.");
+
+  return assertIdempotencyKey(`cancel_${p.paymentKey}_${total}_${p.cancelAmount}`);
 }

@@ -182,6 +182,10 @@ export async function cancelPayment(cfg: TossConfig, input: CancelInput): Promis
     if (!Number.isSafeInteger(input.cancelAmount) || input.cancelAmount <= 0) throw new Error("INVALID_AMOUNT: 취소 금액은 양의 정수(원)여야 한다.");
 
     body.cancelAmount = input.cancelAmount;
+
+    const t = input.alreadyCanceledTotal;
+
+    if (typeof t !== "number" || !Number.isSafeInteger(t) || t < 0) throw new Error("INVALID_CANCELED_TOTAL: 부분 취소에는 요청 직전 취소 누계(alreadyCanceledTotal)가 필수다.");
   }
 
   const r = await call(cfg, "POST", `/v1/payments/${encodeURIComponent(input.paymentKey)}/cancel`, { idempotencyKey: key, body });
@@ -215,7 +219,21 @@ export async function cancelPayment(cfg: TossConfig, input: CancelInput): Promis
 
   const p = toPayment(r.body);
 
-  if (p && p.paymentKey === input.paymentKey && (p.status === "CANCELED" || p.status === "PARTIAL_CANCELED")) return { kind: "canceled", payment: p, alreadyCanceled: false };
+  if (p && p.paymentKey === input.paymentKey && (p.status === "CANCELED" || p.status === "PARTIAL_CANCELED")) {
+    if (input.cancelAmount === undefined) {
+      if (p.status === "CANCELED") return { kind: "canceled", payment: p, alreadyCanceled: false };
+    } else {
+      // 부분 취소: 같은 키 재사용으로 토스가 첫 응답을 그대로 돌려준 경우(실제 환불 없음)를 걸러낸다 — 취소 누계가 이번 금액만큼 늘었어야 한다.
+      const expected = input.alreadyCanceledTotal! + input.cancelAmount;
+      const sum = p.cancels.reduce((s, c) => s + c.cancelAmount, 0);
+      const byBalance = p.balanceAmount === null ? null : p.totalAmount - p.balanceAmount;
+      const ok = (p.cancels.length > 0 || byBalance !== null) && (p.cancels.length === 0 || sum === expected) && (byBalance === null || byBalance === expected);
+
+      if (ok) return { kind: "canceled", payment: p, alreadyCanceled: false };
+
+      return { kind: "uncertain", code: "CANCEL_NOT_APPLIED", message: "취소 응답의 취소 누계가 요청 금액만큼 늘지 않았습니다(같은 키의 이전 응답일 수 있음). 조회로 확인하세요." };
+    }
+  }
 
   return { kind: "uncertain", code: "BAD_RESPONSE", message: "취소 응답의 상태를 확인하지 못했습니다." };
 }

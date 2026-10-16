@@ -83,6 +83,8 @@ export interface CancelInput {
   cancelReason: string;
   /** 생략하면 전액 취소 */
   cancelAmount?: number;
+  /** 부분 취소(cancelAmount 지정)일 때 필수: 요청 직전 토스 기준 취소 누계(원). 응답 검증(이번 금액만큼 늘었는지)에 쓴다. 전액 취소는 생략. */
+  alreadyCanceledTotal?: number;
   /** 필수. 같은 취소 건에는 항상 같은 값(cancelIdempotencyKey 로 만든다). */
   idempotencyKey: string;
 }

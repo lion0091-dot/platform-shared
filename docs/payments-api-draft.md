@@ -18,7 +18,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 |---|---|---|
 | `confirmPayment` | `{paymentKey, orderId, amount(서버 기대 금액, 원·정수), idempotencyKey?}` | `ConfirmOutcome` |
 | `getPaymentByOrderId` / `getPayment` | orderId / paymentKey | `LookupOutcome` |
-| `cancelPayment` | `{paymentKey, cancelReason(200자로 자름), cancelAmount?(생략=전액), idempotencyKey(필수)}` | `CancelOutcome` |
+| `cancelPayment` | `{paymentKey, cancelReason(200자로 자름), cancelAmount?(생략=전액), alreadyCanceledTotal(부분 취소면 필수), idempotencyKey(필수)}` | `CancelOutcome` |
 | `interpretPayment(payment, {orderId, amount})` | 조회 결과 + 앱이 DB 에서 가져온 기대값 | `paid`·`canceled`·`partial_canceled`·`in_progress`·`not_paid`·`mismatch` |
 | `classifyFailCode(code)` | failUrl 쿼리 code | `user_canceled`·`aborted`·`card_rejected`·`other` |
 | `classifyTossError(op, httpStatus, code)` | 순수 분류 | `ErrorClass` |
@@ -64,7 +64,9 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 ### 3.3 취소(cancel)
 | 토스 응답 | `kind` | 앱이 할 일 |
 |---|---|---|
-| 200, status CANCELED/PARTIAL_CANCELED | `canceled`(`alreadyCanceled:false`) | DB 취소 반영 |
+| 200, 전액 요청 → status CANCELED | `canceled`(`alreadyCanceled:false`) | DB 취소 반영 |
+| 200, 부분 요청(`cancelAmount`+`alreadyCanceledTotal`) → 응답 `cancels` 합 = 누계+이번 금액(그리고 `balanceAmount` 가 있으면 `totalAmount-balanceAmount` 도 같음) | `canceled`(`alreadyCanceled:false`) | DB 취소 반영 |
+| 200 인데 위 검증 불일치·확인할 `cancels`/`balanceAmount` 없음·전액 요청에 PARTIAL_CANCELED | `uncertain`(`CANCEL_NOT_APPLIED` 또는 `BAD_RESPONSE`) | 같은 키의 이전 응답(캐시)일 수 있음 → 환불을 두 번 한 것으로 기록하지 말고 `getPayment` 로 확인 |
 | 400 `ALREADY_CANCELED_PAYMENT`·`ALREADY_REFUND_PAYMENT` → 라이브러리가 `paymentKey` 조회, CANCELED 확인 | `canceled`(`alreadyCanceled:true`) | 성공 취급, **DB 정리는 앱**(PG 는 취소·DB 는 PAID 인 불일치 해소) |
 | 위 두 코드인데 조회로 CANCELED 확인 못 함 | `uncertain` | 사람이 확인 |
 | 400 `ALREADY_REFUNDING_PAYMENT`, 409 `IDEMPOTENT_REQUEST_PROCESSING` | `processing` | 잠시 뒤 조회 |
@@ -80,7 +82,8 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - 헤더 `Idempotency-Key`, 최대 300자, 첫 요청부터 15일 유효. (키+API키+URL+메서드)가 같으면 첫 응답을 돌려줌(문서). GET 에는 무시됨. 409 `IDEMPOTENT_REQUEST_PROCESSING` = 첫 요청 처리 중.
 - **에러가 나도 키를 바꿔 재시도하지 않는다.** 원인을 조회로 확인한 뒤 같은 키로 보낸다.
 - **confirm 키 = 주문번호 + paymentKey 조합**: `confirmIdempotencyKey(orderId, paymentKey)` = `confirm_<orderId>_<paymentKey>`. 같은 주문번호로 새 결제창을 열어 새 paymentKey 가 생기면 새 키가 되어 이전 시도의 캐시 응답이 재사용되지 않는다. 재시도·새로고침 때는 같은 paymentKey 라 같은 키. (paymentKey 가 길어 300자를 넘으면 throw — 실제 길이는 미확인, 보통 약 40~200자 추정이나 단정 못 함.)
-- **cancel 키**: 호출자가 반드시 넘긴다. `cancelIdempotencyKey({paymentKey, cancelAmount, alreadyCanceledTotal})` = `cancel_<paymentKey>_<기취소합계>_<금액|full>`. 같은 취소 요청이면 같은 키, 부분취소가 반복돼도 기취소 합계가 달라 구분된다.
+- **cancel 키**: 호출자가 반드시 넘긴다. 전액 취소 = `cancelIdempotencyKey({paymentKey})` = `cancel_<paymentKey>_full`. **부분 취소 = `cancelIdempotencyKey({paymentKey, cancelAmount, alreadyCanceledTotal})` = `cancel_<paymentKey>_<취소누계>_<금액>` 이며 `alreadyCanceledTotal`(요청 직전 토스 기준 취소 누계)이 필수**(타입·런타임 모두, 없으면 throw). 누계를 빼면 같은 금액의 두 번째 부분 취소가 첫 번째와 같은 키가 되어 토스가 첫 응답을 돌려주고 실제 환불은 1회뿐인데 앱은 두 번 환불된 줄 알게 된다.
+- **앱 규칙(부분 취소)**: 취소 직전에 `getPayment` 로 현재 취소 누계(`cancels` 합 또는 `totalAmount - balanceAmount`)를 조회해 `alreadyCanceledTotal` 로 넘긴다. 같은 취소 건을 재시도할 때는 처음 조회한 누계와 같은 키를 그대로 쓴다(재시도 중 누계가 바뀌었다고 키를 바꾸지 않는다 — 불확실하면 먼저 조회).
 - 키 문자는 보이는 ASCII(`!`~`~`)만 허용(우리 쪽 안전 제약; 토스 문서의 문자 제한은 미확인).
 - 키는 로그에 남겨도 비밀이 아니지만 시크릿키·Authorization 헤더는 절대 로그에 남기지 않는다.
 
@@ -107,7 +110,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - 현재 코드는 예외(`TossPaymentsError{code}`)를 던지는 방식, 이 모듈은 값(`kind`)을 반환 → 호출부를 `switch(kind)` 로 바꿔야 한다. 기존 `getPaymentByOrderId` 의 404→`null` 은 `not_found`.
 - 기존에 없던 것: 승인·취소 `Idempotency-Key`, 승인 응답 `status===DONE`·금액 검증(현재는 호출부가 함), 조회 후 확정 규칙. 대조 크론은 `uncertain/processing` 을 만났을 때 PENDING 유지.
 - **결제창 SDK 는 2단계**(이 모듈에 없음). 현재 SDK 를 그대로 쓴다.
-- 취소는 현재 전액(`cancelAmount` 생략)만 쓴다 → 그대로 호환, 부분취소는 선택.
+- 취소는 현재 전액(`cancelAmount` 생략)만 쓴다 → 그대로 호환. 부분취소를 쓸 때는 §4 의 누계 규칙(취소 전 조회해 `alreadyCanceledTotal` 전달)을 따른다. shipping 은 부분 환불을 쓰므로 기존 키 `refund-<id>-<기환불합계>-<금액>` 과 같은 발상이지만 이 모듈의 키 함수로 바꾸면 기존 진행 중 취소의 키가 달라지니 전환 시점에 진행 중인 취소가 없는지 확인한다.
 ### 공통
 - 앱 package.json 에 platform-shared 새 버전을 올릴 때 두 앱을 같이 올린다(README 규칙). 아직 버전·태그 없음.
 - 앱 시험에서는 `fetch` 를 주입(`cfg.fetch`)해 모의한다.
@@ -120,5 +123,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - 웹훅(`PAYMENT_STATUS_CHANGED`)은 범위 밖. 서명 검증 방법이 문서에 없다(shipping 점검표).
 - 에러 코드 페이지 전체 목록 중 이번에 분류한 것 외의 코드(가상계좌·자동결제 전용 등)는 모두 `uncertain`(승인) 쪽으로 떨어진다 — 더 정확히 하려면 코드 추가 필요.
 - `INVALID_REQUEST`(400)는 에러 코드 페이지의 결제 승인 섹션에서 확인(메시지: 잘못된 요청). 다만 "결제가 일어나지 않았다"는 보장은 문서에 명시돼 있지 않다 — 400 계열이라 거절로 보고 fatal 에 넣었다(판단). 페이지가 일부 잘렸을 수 있어(열람 도구 표시) 다른 코드가 빠졌을 수 있음.
+- 위험(문서 근거 없음): confirm 의 `INVALID_REQUEST` 는 "결제가 일어나지 않았다"는 보장이 토스 문서에 없다. 승인이 이미 처리된 뒤 같은 요청이 `INVALID_REQUEST` 로 거절되는 경우(예: 이미 사용된 paymentKey 형식 문제)가 있는지 미확인 → 앱은 `fatal` 로 FAILED 확정하기 전에 `getPaymentByOrderId` 로 한 번 확인하는 것이 안전하다(비용 작음). 요청 값은 호출 전 검증(금액·orderId)으로 이미 걸러진다.
+- lookup 에서 `fatal`: 분류표의 분명한 실패 코드(`UNAUTHORIZED_KEY`·`FORBIDDEN_REQUEST`·`INVALID_REQUEST`·`INVALID_API_KEY` 등)만 `fatal`, 그 밖의 모르는 코드·5xx 는 `uncertain` 으로 떨어진다. 앱 영향: lookup `fatal` 은 "확인 불가"일 뿐 결제 실패가 아니다 → PENDING 유지 + 운영 알림, FAILED/취소로 바꾸지 않는다. 404·`NOT_FOUND_PAYMENT`·`NOT_FOUND` 는 `not_found`(승인 없음).
 - `balanceAmount`·`cancels` 필드명·타입은 토스 reference 페이지(Payment 객체)에서 확인: `balanceAmount` number, `cancels` nullable array(`cancelAmount`·`cancelReason`·`canceledAt`·`transactionKey`·`cancelStatus` 등). 전용 payment-object 주소는 404 였고 reference 메인에서 확인.
 - 모든 동작은 fetch 모의로만 검증, 실제 토스 호출·테스트 키 검증 없음.
