@@ -134,6 +134,14 @@ describe("confirm 분류표", () => {
     expect(await confirm(mk(err(s, c)))).toMatchObject({ kind: "fatal", code: c });
   });
 
+  it("재승인: 이미 DONE 인 같은 주문·키·금액에 토스가 200 DONE 을 또 준다(실측) → 같은·다른 멱등키 모두 success", async () => {
+    const m = mk(resp(pay()), resp(pay()), resp(pay()));
+
+    expect(await confirm(m)).toMatchObject({ kind: "success" });
+    expect(await confirm(m)).toMatchObject({ kind: "success" });
+    expect(await confirmPayment(cfgOf(m), { paymentKey: PK, orderId: OID, amount: 10000, idempotencyKey: "other-key-1" })).toMatchObject({ kind: "success" });
+  });
+
   it("session_expired: NOT_FOUND_PAYMENT_SESSION", async () => {
     expect(await confirm(mk(err(404, "NOT_FOUND_PAYMENT_SESSION")))).toEqual({ kind: "session_expired", code: "NOT_FOUND_PAYMENT_SESSION", message: "msg NOT_FOUND_PAYMENT_SESSION" });
   });
@@ -189,6 +197,9 @@ describe("조회", () => {
     expect(interpretPayment(p({}), exp)).toBe("paid");
     expect(interpretPayment(p({ status: "CANCELED" }), exp)).toBe("canceled");
     expect(interpretPayment(p({ status: "PARTIAL_CANCELED" }), exp)).toBe("partial_canceled");
+    expect(interpretPayment(p({ status: "PARTIAL_CANCELED", balanceAmount: 3000 }), exp)).toBe("partial_canceled");
+    expect(interpretPayment(p({ status: "PARTIAL_CANCELED", balanceAmount: 0 }), exp)).toBe("canceled"); // 부분 취소로 잔액 0 (토스 실측: status 는 PARTIAL_CANCELED 로 남음)
+    expect(interpretPayment(p({ status: "PARTIAL_CANCELED", balanceAmount: null }), exp)).toBe("partial_canceled");
     expect(interpretPayment(p({ status: "IN_PROGRESS" }), exp)).toBe("in_progress");
     expect(interpretPayment(p({ status: "READY" }), exp)).toBe("in_progress");
     expect(interpretPayment(p({ status: "ABORTED" }), exp)).toBe("not_paid");
@@ -234,6 +245,20 @@ describe("cancel 분류표", () => {
 
   it.each(["NOT_CANCELABLE_PAYMENT", "NOT_CANCELABLE_AMOUNT", "NOT_CANCELABLE_PAYMENT_FOR_DORMANT_USER", "EXCEED_MAX_REFUND_DUE"])("not_cancelable: %s", async (c) => {
     expect(await cancel(mk(err(403, c)))).toMatchObject({ kind: "not_cancelable", code: c });
+  });
+
+  it("not_cancelable: 이미 전액 취소된 결제 재취소(NOT_CANCELABLE_AMOUNT) — 토스 한글 message 전달(실측)", async () => {
+    const r = await cancel(mk(resp({ code: "NOT_CANCELABLE_AMOUNT", message: "취소 할 수 없는 금액 입니다." }, 400)));
+
+    expect(r).toEqual({ kind: "not_cancelable", code: "NOT_CANCELABLE_AMOUNT", message: "취소 할 수 없는 금액 입니다." });
+  });
+
+  it("ALREADY_CANCELED 인데 조회가 PARTIAL_CANCELED+balance 0 이면 canceled(alreadyCanceled), 잔액이 남아 있으면 uncertain", async () => {
+    const zero = mk(err(400, "ALREADY_CANCELED_PAYMENT"), resp(pay({ status: "PARTIAL_CANCELED", balanceAmount: 0, cancels: [{ cancelAmount: 10000 }] })));
+    const left = mk(err(400, "ALREADY_CANCELED_PAYMENT"), resp(pay({ status: "PARTIAL_CANCELED", balanceAmount: 4000, cancels: [{ cancelAmount: 6000 }] })));
+
+    expect(await cancel(zero)).toMatchObject({ kind: "canceled", alreadyCanceled: true });
+    expect(await cancel(left)).toMatchObject({ kind: "uncertain", code: "ALREADY_CANCELED_PAYMENT" });
   });
 
   it("uncertain: PROVIDER_ERROR·5xx·네트워크·응답 상태 이상", async () => {

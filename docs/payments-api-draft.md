@@ -96,6 +96,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 1. **불확실(`uncertain`·`processing`·`already_done`·`approved_mismatch`)은 FAILED 로 확정하지 않는다.** PENDING(또는 pending 테이블 행)을 유지하고 `getPaymentByOrderId` → `interpretPayment` 로 확정한다. FAILED 로 한 번 굳으면 승인이 실제로 됐어도 되살릴 수 없다(shipping 점검표 P1).
 2. 완료 반영 조건은 (a) `confirm.success` 또는 (b) 조회 `paid` 이며 **orderId·금액이 앱이 DB 에서 가져온 값과 일치**할 때뿐이다. 클라이언트가 준 amount 는 신뢰하지 않는다.
 3. 같은 주문의 두 번째 요청(연타·새로고침)은 `processing`/`already_done` 으로 온다 — 실패로 보지 말고 조회로 수렴시킨다.
+3-1. **`success` 는 "이번 호출이 처음 승인했다"는 뜻이 아니다.** 이미 DONE 인 같은 orderId·paymentKey·amount 로 confirm 을 다시 보내면 토스는 `ALREADY_PROCESSED_PAYMENT` 가 아니라 **200 DONE 을 그대로** 돌려준다(같은 멱등키·다른 멱등키 모두, 2026-10-16 실측). 그러므로 앱은 success 를 받아도 DB 의 현재 상태를 조건부 UPDATE(`WHERE status <> 'PAID'` 등, 영향 행 수 확인)로 먼저 본 뒤 **처음 PAID 로 바뀐 요청만** 정산·모집 시작 같은 후속 반영을 한다. `ALREADY_PROCESSED_PAYMENT` 는 Test-Code 헤더로만 재현됐다(실결제 응답은 미확인).
 4. 승인 후 DB 반영이 실패하면 PENDING 이 남는다 → 앱의 정합 크론이 PENDING 을 조회로 확정한다(라이브러리는 크론을 제공하지 않음). PENDING 을 FAILED/취소로 만들기 전에 반드시 조회.
 5. 취소: 같은 취소 건엔 같은 멱등키. `canceled(alreadyCanceled)` 도 성공으로 DB 를 정리. `retry_later` 는 재시도, `not_cancelable` 은 재시도 금지.
 6. `approved_mismatch` 는 "돈은 승인됐다": 자동으로 무시 금지. 취소 호출은 앱이 결정하고 사람이 확인한다.
@@ -123,6 +124,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - 앱 시험에서는 `fetch` 를 주입(`cfg.fetch`)해 모의한다.
 
 ## 7. 미확인 항목
+- 취소 완료 판정: 부분 취소로 잔액을 0 까지 만들어도 토스 status 는 `PARTIAL_CANCELED` 로 남는다(실측) → `interpretPayment`·`cancelPayment` 의 이미 취소 확인은 `CANCELED` 이거나 `PARTIAL_CANCELED`+`balanceAmount===0` 을 완전 취소로 본다. **미시험**: 한 번에 전액 취소 요청한 응답이 `PARTIAL_CANCELED`+balance 0 인 경우(현행: `uncertain`, 조회로 확정). 이미 전액 취소된 결제의 재취소는 `NOT_CANCELABLE_AMOUNT`("취소 할 수 없는 금액 입니다.", 실측) → `not_cancelable`.
 - 공식 문서에 `IDEMPOTENT_REQUEST_PROCESSING` 은 멱등키 페이지에만 있고 에러 코드 페이지에는 없다(대신 `ALREADY_PROCESSING_REQUEST` 400). 둘 다 `processing` 으로 처리.
 - 승인 유효 시간: 승인 API 문서 10분 vs Payment 객체 `EXPIRED` 설명 30분(shipping 점검표 인용, 이번에 재확인 안 함).
 - `FORBIDDEN_CONSECUTIVE_REQUEST` 가 confirm 에서 오는지: 문서는 조회·취소에만 기재 → confirm 에서는 모르는 코드로 보아 `uncertain`.

@@ -1,3 +1,4 @@
+import { isFullyCanceled } from "./status";
 import type { FailUrlKind, PaymentInterpretation, TossPayment } from "./types";
 
 export type Op = "confirm" | "lookup" | "cancel";
@@ -79,6 +80,8 @@ export function classifyFailCode(code: string | null | undefined): FailUrlKind {
 /** 조회 결과(Payment)를 앱이 기대한 주문·금액과 대조해 해석한다. expected 는 앱이 DB 에서 가져온 값이어야 한다. */
 export function interpretPayment(payment: TossPayment, expected: { orderId: string; amount: number }): PaymentInterpretation {
   if (payment.orderId !== expected.orderId || payment.totalAmount !== expected.amount) return "mismatch";
+
+  if (isFullyCanceled(payment)) return "canceled";
 
   switch (payment.status) {
     case "DONE":

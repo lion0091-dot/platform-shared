@@ -1,6 +1,7 @@
 import { classifyTossError } from "./classify";
 import { assertIdempotencyKey, confirmIdempotencyKey } from "./idempotency";
 import { assertOrderId } from "./orderId";
+import { isFullyCanceled } from "./status";
 import type { CancelInput,CancelOutcome, ConfirmInput, ConfirmOutcome, LookupOutcome, TossCancel, TossConfig, TossPayment } from "./types";
 
 const BASE_URL = "https://api.tosspayments.com";
@@ -198,9 +199,9 @@ export async function cancelPayment(cfg: TossConfig, input: CancelInput): Promis
     if (c === "already_canceled") {
       const l = await getPayment(cfg, input.paymentKey);
 
-      return l.kind === "found" && l.payment.status === "CANCELED"
+      return l.kind === "found" && isFullyCanceled(l.payment)
         ? { kind: "canceled", payment: l.payment, alreadyCanceled: true }
-        : { kind: "uncertain", code: r.code, message: "이미 취소됐다는 응답이지만 조회로 CANCELED 를 확인하지 못했습니다." };
+        : { kind: "uncertain", code: r.code, message: "이미 취소됐다는 응답이지만 조회로 취소 완료를 확인하지 못했습니다." };
     }
 
     switch (c) {
