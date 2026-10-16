@@ -1,6 +1,6 @@
 # 공용 결제 라이브러리 초안 — `@platform/shared/payments`
 
-상태: 초안(버전·태그 없음, 모의 시험만 통과, 실제 토스 호출 없음). 대상: meatpartners·shipping 개발자. 근거: docs.tosspayments.com 의 에러 코드·멱등키 페이지(2026-10-16 열람), 두 앱의 기존 결제 코드. 문서에서 확인 못 한 것은 "미확인".
+상태: 초안(버전·태그 없음, 모의 시험만 통과, 실제 토스 호출 없음 — 테스트 키 통합 시험은 §8, 아직 미실행). 대상: meatpartners·shipping 개발자. 근거: docs.tosspayments.com 의 에러 코드·멱등키 페이지(2026-10-16 열람), 두 앱의 기존 결제 코드. 문서에서 확인 못 한 것은 "미확인".
 
 ## 1. 범위
 포함: 승인(confirm)·조회(주문번호/paymentKey)·취소(cancel) 호출, Basic 인증, 타임아웃, Idempotency-Key 규칙, 승인 응답 검증, 오류 분류, failUrl code 분류, 주문번호 검증·생성.
@@ -135,4 +135,19 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - `balanceAmount`·`cancels` 필드명·타입은 토스 reference 페이지(Payment 객체)에서 확인: `balanceAmount` number, `cancels` nullable array(`cancelAmount`·`cancelReason`·`canceledAt`·`transactionKey`·`cancelStatus` 등). 전용 payment-object 주소는 404 였고 reference 메인에서 확인.
 - 에러 응답의 멱등키 재생 여부(§4)는 미확인(안전 쪽 가정: 재생됨).
 - `TossPayment` 는 현재 method 외의 카드 정보·영수증 URL 등을 포함하지 않는다(필요해지면 추가).
-- 모든 동작은 fetch 모의로만 검증, 실제 토스 호출·테스트 키 검증 없음.
+- 모든 동작은 fetch 모의로만 검증, 실제 토스 호출·테스트 키 검증 없음. 테스트 키 통합 시험(§8)은 작성만 됐고 아직 돌려보지 않았다(작성 환경에서 api.tosspayments.com 접속 불가).
+
+## 8. 테스트 키 통합 시험(계약 전 가능)
+토스는 계약 없이 개발자센터 가입만으로 테스트 키를 준다(`test_ck_`/`test_sk_` = API 개별 연동, `test_gck_`/`test_gsk_` = 결제위젯). 테스트와 운영은 같은 주소(`api.tosspayments.com`)를 쓰고 키 접두어로 모드가 갈린다 — 코드는 그대로, 키만 바꾼다. 실제 청구는 없다.
+
+시험 파일 `src/payments/toss.integration.test.ts`, 실행 `npm run test:toss`. 환경변수가 없으면 건너뛰므로 평소 `npm test` 에는 외부 호출이 없다. `live_` 키를 넣으면 시험 파일이 즉시 실패한다(실제 환불 방지).
+
+1단계 — 키만으로(결제창 불필요): `TOSS_TEST_SECRET_KEY=test_sk_… npm run test:toss`
+- 없는 주문번호·paymentKey 조회 → `not_found`, 틀린 키 → `fatal`, 가짜 paymentKey 승인 → `session_expired`/`fatal`, 가짜 paymentKey 취소 → `fatal`/`not_cancelable`. 인증 헤더와 실제 오류 코드의 분류를 확인한다.
+
+2단계 — 결제 1건으로 전 과정(승인·멱등 재생·조회·부분취소 2회·전액취소·중복취소):
+1. `npx serve scripts` 로 `scripts/toss-test-checkout.html` 을 열고 테스트 클라이언트 키(`test_ck_…`, 시크릿키와 같은 API 개별 연동 키 쌍)와 금액(3000 이상)을 넣어 결제창에서 결제한다.
+2. 돌아온 페이지가 보여주는 `TOSS_TEST_PAYMENT_KEY`·`TOSS_TEST_ORDER_ID`·`TOSS_TEST_AMOUNT` 를 export 하고 **제한 시간(약 10분, §7) 안에** `npm run test:toss`.
+3. paymentKey 하나는 한 번만 쓴다(시험이 승인 후 전액 취소까지 진행). 다시 돌리려면 1부터.
+
+기대와 다른 kind 가 나오면 실패 메시지에 결과 JSON(토스 code 포함)이 찍힌다 — 그 code 로 §3 분류표·`classify.ts` 를 고친다. 이 시험이 확인하는 미확인 항목: 같은 멱등키 재호출의 응답 재생(§4), `ALREADY_PROCESSED_PAYMENT`·`ALREADY_CANCELED_PAYMENT` 의 실제 발생, 부분 취소 응답의 `cancels`·`balanceAmount`.
