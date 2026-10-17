@@ -78,8 +78,12 @@ describe("입력 검증 보강", () => {
 });
 
 describe("확정 거절 코드 추가", () => {
-  it.each(["EXCEED_MAX_PAYMENT_AMOUNT", "EXCEED_MAX_DAILY_PAYMENT_COUNT", "EXCEED_MAX_AUTH_COUNT", "NOT_ALLOWED_POINT_USE", "BELOW_MINIMUM_AMOUNT", "INVALID_PASSWORD", "FDS_ERROR"])("confirm %s → fatal", (code) => {
+  it.each(["EXCEED_MAX_PAYMENT_AMOUNT", "EXCEED_MAX_DAILY_PAYMENT_COUNT", "EXCEED_MAX_AUTH_COUNT", "NOT_ALLOWED_POINT_USE", "BELOW_MINIMUM_AMOUNT", "INVALID_PASSWORD"])("confirm %s → fatal", (code) => {
     expect(classifyTossError("confirm", 400, code)).toBe("fatal");
+  });
+
+  it("FDS_ERROR 는 본인 인증 뒤 결제가 이어질 수 있어 uncertain(조회로 확정)", () => {
+    expect(classifyTossError("confirm", 403, "FDS_ERROR")).toBe("uncertain");
   });
 
   it("모르는 코드·UNAPPROVED_ORDER_ID·CARD_PROCESSING_ERROR 는 여전히 uncertain", () => {

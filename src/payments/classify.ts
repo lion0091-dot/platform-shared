@@ -62,8 +62,8 @@ export const DEFINITE_FAILURE: ReadonlySet<string> = new Set([
   "NOT_AVAILABLE_BANK",
   "INVALID_PASSWORD",
   "INCORRECT_BASIC_AUTH_FORMAT",
-  "FDS_ERROR",
 ]);
+// FDS_ERROR(403)는 일부러 뺐다 → 불확실: 위험거래 감지 후 문자 링크로 본인 인증을 하면 결제가 가능하다는 안내가 토스 에러 코드 페이지에 있어(https://docs.tosspayments.com/reference/error-codes, 2026-10-17 열람), 응답 뒤에 승인이 이어질 수 있다. 조회로 확정한다.
 
 /** 취소 섹션: 같은 요청을 되풀이해도 소용없어 사람이 처리해야 하는 코드(NOT_CANCELABLE_* 외) */
 const NOT_CANCELABLE_EXTRA = new Set([
