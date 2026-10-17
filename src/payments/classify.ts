@@ -41,6 +41,42 @@ export const DEFINITE_FAILURE: ReadonlySet<string> = new Set([
   // 결제 승인 섹션(공식 에러 코드 페이지 2026-10-16 열람, 400): 할부 개월 초과·할부 미지원 카드
   "EXCEED_MAX_CARD_INSTALLMENT_PLAN",
   "NOT_SUPPORTED_MONTHLY_INSTALLMENT_PLAN",
+  // 결제 승인 섹션(공식 에러 코드 페이지 2026-10-17 열람): 한도·횟수·시간대·인증·계정 계열 거절
+  "EXCEED_MAX_DAILY_PAYMENT_COUNT",
+  "EXCEED_MAX_PAYMENT_AMOUNT",
+  "EXCEED_MAX_ONE_DAY_WITHDRAW_AMOUNT",
+  "EXCEED_MAX_ONE_TIME_WITHDRAW_AMOUNT",
+  "EXCEED_MAX_AMOUNT",
+  "EXCEED_MAX_MONTHLY_PAYMENT_AMOUNT",
+  "EXCEED_MAX_AUTH_COUNT",
+  "EXCEED_MAX_ONE_DAY_AMOUNT",
+  "NOT_ALLOWED_POINT_USE",
+  "BELOW_MINIMUM_AMOUNT",
+  "NOT_FOUND_TERMINAL_ID",
+  "INVALID_AUTHORIZE_AUTH",
+  "RESTRICTED_TRANSFER_ACCOUNT",
+  "INVALID_UNREGISTERED_SUBMALL",
+  "NOT_REGISTERED_BUSINESS",
+  "INVALID_ACCOUNT_INFO_RE_REGISTER",
+  "NOT_AVAILABLE_PAYMENT",
+  "NOT_AVAILABLE_BANK",
+  "INVALID_PASSWORD",
+  "INCORRECT_BASIC_AUTH_FORMAT",
+  "FDS_ERROR",
+]);
+
+/** 취소 섹션: 같은 요청을 되풀이해도 소용없어 사람이 처리해야 하는 코드(NOT_CANCELABLE_* 외) */
+const NOT_CANCELABLE_EXTRA = new Set([
+  "EXCEED_CANCEL_LIMIT",
+  "REFUND_REJECTED",
+  "NOT_ALLOWED_PARTIAL_REFUND",
+  "NOT_ALLOWED_PARTIAL_REFUND_WAITING_DEPOSIT",
+  "EXCEED_CANCEL_AMOUNT_DISCOUNT_AMOUNT",
+  "FORBIDDEN_BANK_REFUND_REQUEST",
+  "FAILED_CLOSED_ACCOUNT_REFUND",
+  "INVALID_REFUND_ACCOUNT_INFO",
+  "INVALID_REFUND_ACCOUNT_NUMBER",
+  "INVALID_BANK",
 ]);
 
 /** 토스 오류(HTTP 상태 + code) → 분류. 순수 함수. 분류표는 docs/payments-api-draft.md. */
@@ -54,7 +90,9 @@ export function classifyTossError(op: Op, httpStatus: number, code: string): Err
 
   if (op === "cancel") {
     if (code === "ALREADY_CANCELED_PAYMENT" || code === "ALREADY_REFUND_PAYMENT") return "already_canceled";
-    if (code.startsWith("NOT_CANCELABLE_") || code === "EXCEED_MAX_REFUND_DUE") return "not_cancelable";
+    if (code.startsWith("NOT_CANCELABLE_") || code === "EXCEED_MAX_REFUND_DUE" || NOT_CANCELABLE_EXTRA.has(code)) return "not_cancelable";
+    // 은행 서비스 시간이 아님: 환불은 일어나지 않았고 시간이 지나면 가능 → 같은 키로 나중에 재시도
+    if (code === "NOT_AVAILABLE_BANK") return "retry_later";
   }
 
   if (op !== "confirm" && code === "FORBIDDEN_CONSECUTIVE_REQUEST") return "retry_later";
@@ -80,6 +118,8 @@ export function classifyFailCode(code: string | null | undefined): FailUrlKind {
 /** 조회 결과(Payment)를 앱이 기대한 주문·금액과 대조해 해석한다. expected 는 앱이 DB 에서 가져온 값이어야 한다. */
 export function interpretPayment(payment: TossPayment, expected: { orderId: string; amount: number }): PaymentInterpretation {
   if (payment.orderId !== expected.orderId || payment.totalAmount !== expected.amount) return "mismatch";
+  // 통화가 KRW 가 아니면 금액이 같아 보여도 같은 값이 아니다(응답에 통화가 없으면 KRW 로 본다)
+  if (payment.currency && payment.currency !== "KRW") return "mismatch";
 
   if (isFullyCanceled(payment)) return "canceled";
 
@@ -90,6 +130,8 @@ export function interpretPayment(payment: TossPayment, expected: { orderId: stri
       return "canceled";
     case "PARTIAL_CANCELED":
       return "partial_canceled";
+    case "WAITING_FOR_DEPOSIT":
+      return "waiting_for_deposit";
     case "ABORTED":
     case "EXPIRED":
       return "not_paid";

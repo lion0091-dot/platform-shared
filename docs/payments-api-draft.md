@@ -44,9 +44,12 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 | 400 `ALREADY_PROCESSED_PAYMENT` | `already_done` | 조회로 확정 | `getPaymentByOrderId` → `interpretPayment`=paid 면 완료 반영(주문·금액 일치 때만) |
 | 409 `IDEMPOTENT_REQUEST_PROCESSING`, 400 `ALREADY_PROCESSING_REQUEST` | `processing` | 불확실 | PENDING 유지, 잠시 뒤 조회(또는 같은 키로 재호출). **FAILED 금지** |
 | 400 `PROVIDER_ERROR`, 500 `FAILED_INTERNAL_SYSTEM_PROCESSING`·`FAILED_PAYMENT_INTERNAL_SYSTEM_PROCESSING`, 5xx 전부, 429, 타임아웃(`TIMEOUT`), 네트워크(`NETWORK`), **목록에 없는 모든 코드**, `CARD_PROCESSING_ERROR` | `uncertain` | 불확실 | PENDING 유지, 조회로 확정. **FAILED 확정 금지** |
-| 404 `NOT_FOUND_PAYMENT_SESSION` | `session_expired`(토스 한글 message 동봉) | 분명한 실패(세션 만료) | 새 결제창으로 다시 시작(새 paymentKey) |
+| 200, status=`WAITING_FOR_DEPOSIT`, orderId·paymentKey·금액 일치 (가상계좌 발급) | `waiting_for_deposit`(`payment.virtualAccount`) | 입금 대기(승인 완료 아님) | 계좌 안내, PENDING 유지, 입금 웹훅 수신 시 §8 순서로 확정 |
+| 404 `NOT_FOUND_PAYMENT_SESSION` | `session_expired`(토스 한글 message 동봉) | 분명한 실패(세션 만료) — 단 응답 유실 뒤 다른 키로 재호출한 경우일 수 있음 | **새 결제창 안내 전에 `getPaymentByOrderId` 로 이미 승인된 건이 아닌지 확인**, 없을 때만 새 결제창(새 paymentKey) |
 | 401 `UNAUTHORIZED_KEY`, 400 `INVALID_API_KEY`(시크릿키 오류), 403 `FORBIDDEN_REQUEST`, 404 `NOT_FOUND_PAYMENT`, 400 `INVALID_REQUEST`(잘못된 요청) | `fatal` | 분명한 실패 | 즉시 실패. 키 오류는 운영 알림 필요, `INVALID_REQUEST` 는 요청 값(주문번호·금액 등) 점검 |
 | 403 `REJECT_CARD_COMPANY`(승인 거절)·`REJECT_CARD_PAYMENT`(한도초과·잔액부족)·`REJECT_ACCOUNT_PAYMENT`·`REJECT_TOSSPAY_INVALID_ACCOUNT`, 400 `INVALID_REJECT_CARD`·`INVALID_CARD_EXPIRATION`·`INVALID_STOPPED_CARD`·`INVALID_CARD_LOST_OR_STOLEN`·`INVALID_CARD_NUMBER`·`INVALID_CARD_INSTALLMENT_PLAN`·`NOT_SUPPORTED_INSTALLMENT_PLAN_CARD_OR_MERCHANT`·`EXCEED_MAX_CARD_INSTALLMENT_PLAN`·`NOT_SUPPORTED_MONTHLY_INSTALLMENT_PLAN`(뒤 2건은 공식 승인 섹션 근거, `EXCEED_MAX_CARD_INSTALLMENT_PLAN` 은 2026-10-16 실측으로도 확인) | `fatal` | 분명한 실패 | 즉시 실패 + 사용자 안내(다른 카드/수단). 코드 목록은 `DEFINITE_FAILURE` |
+
+참고: 2026-10-17 에 공식 에러 코드 페이지 승인 섹션을 다시 열람해 한도·횟수·시간대·인증·계정 계열(`EXCEED_MAX_*`·`NOT_ALLOWED_POINT_USE`·`BELOW_MINIMUM_AMOUNT`·`NOT_AVAILABLE_PAYMENT`·`NOT_AVAILABLE_BANK`·`INVALID_PASSWORD`·`FDS_ERROR` 등)을 `DEFINITE_FAILURE` 에 추가했다. `UNAPPROVED_ORDER_ID`·`CARD_PROCESSING_ERROR`·`UNKNOWN_PAYMENT_ERROR`(500) 는 "결제 안 됨" 보장이 없어 `uncertain` 유지.
 
 참고: shipping 의 가짜 코드 `REJECT_CARD` 는 없다. 실제 코드는 `REJECT_CARD_PAYMENT`·`REJECT_CARD_COMPANY` 다(`REJECT_CARD_PAYMENT` 는 승인 API 섹션에만 있고 "전체 에러 목록"에는 없음 — 문서 내부 차이).
 
@@ -69,13 +72,15 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 |---|---|---|
 | 200, 전액 요청 → status CANCELED | `canceled`(`alreadyCanceled:false`) | DB 취소 반영 |
 | 200, 부분 요청(`cancelAmount`+`alreadyCanceledTotal`) → 응답 `cancels` 합 = 누계+이번 금액(그리고 `balanceAmount` 가 있으면 `totalAmount-balanceAmount` 도 같음) | `canceled`(`alreadyCanceled:false`) | DB 취소 반영 |
-| 200 인데 위 검증 불일치·확인할 `cancels`/`balanceAmount` 없음·전액 요청에 PARTIAL_CANCELED | `uncertain`(`CANCEL_NOT_APPLIED` 또는 `BAD_RESPONSE`) | 같은 키의 이전 응답(캐시)일 수 있음 → 환불을 두 번 한 것으로 기록하지 말고 `getPayment` 로 확인 |
+| 200, 전액 요청 → status `PARTIAL_CANCELED` 이고 `balanceAmount===0` | `canceled`(`alreadyCanceled:false`) | DB 취소 반영 |
+| 200 인데 위 검증 불일치·확인할 `cancels`/`balanceAmount` 없음·전액 요청에 잔액이 남은 PARTIAL_CANCELED | `uncertain`(`CANCEL_NOT_APPLIED` 또는 `BAD_RESPONSE`) | 같은 키의 이전 응답(캐시)일 수 있음 → 환불을 두 번 한 것으로 기록하지 말고 `getPayment` 로 확인 |
 | 400 `ALREADY_CANCELED_PAYMENT`·`ALREADY_REFUND_PAYMENT` → 라이브러리가 `paymentKey` 조회, CANCELED 확인 | `canceled`(`alreadyCanceled:true`) | 성공 취급, **DB 정리는 앱**(PG 는 취소·DB 는 PAID 인 불일치 해소) |
 | 위 두 코드인데 조회로 CANCELED 확인 못 함 | `uncertain` | 사람이 확인 |
 | 400 `ALREADY_REFUNDING_PAYMENT`, 409 `IDEMPOTENT_REQUEST_PROCESSING` | `processing` | 잠시 뒤 조회 |
 | 403 `FORBIDDEN_CONSECUTIVE_REQUEST`, 429 | `retry_later` | 잠시 뒤 **같은 키로** 재시도 |
 | 400 `PROVIDER_ERROR`, 5xx, 타임아웃, 네트워크, 응답 상태 이상, 모르는 코드(`CARD_PROCESSING_ERROR` 포함) | `uncertain` | 같은 키 유지, 조회(`getPayment`)로 확정 후 필요하면 같은 키로 재시도 |
-| 403 `NOT_CANCELABLE_PAYMENT`·`NOT_CANCELABLE_AMOUNT`·`NOT_CANCELABLE_PAYMENT_FOR_DORMANT_USER`·`EXCEED_MAX_REFUND_DUE` | `not_cancelable` | 재시도 금지, 사람이 처리(API 밖 환불 등) |
+| 403 `NOT_CANCELABLE_PAYMENT`·`NOT_CANCELABLE_AMOUNT`·`NOT_CANCELABLE_PAYMENT_FOR_DORMANT_USER`·`EXCEED_MAX_REFUND_DUE`, `EXCEED_CANCEL_LIMIT`·`REFUND_REJECTED`·`NOT_ALLOWED_PARTIAL_REFUND(_WAITING_DEPOSIT)`·`EXCEED_CANCEL_AMOUNT_DISCOUNT_AMOUNT`·`FORBIDDEN_BANK_REFUND_REQUEST`·`FAILED_CLOSED_ACCOUNT_REFUND`·환불계좌 오류(`INVALID_REFUND_ACCOUNT_INFO`·`_NUMBER`·`INVALID_BANK`) | `not_cancelable` | 재시도 금지, 사람이 처리(API 밖 환불 등) |
+| 403 `NOT_AVAILABLE_BANK`(은행 서비스 시간 아님) | `retry_later` | 시간이 지난 뒤 **같은 키로** 재시도 |
 | 401 `UNAUTHORIZED_KEY`, 403 `FORBIDDEN_REQUEST` | `fatal` | 알림 |
 
 ### 3.4 failUrl(결제창 실패 리다이렉트) `?code=`
@@ -91,6 +96,13 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - **앱 규칙(부분 취소)**: 취소 직전에 `getPayment` 로 현재 취소 누계(`cancels` 합 또는 `totalAmount - balanceAmount`)를 조회해 `alreadyCanceledTotal` 로 넘긴다. 같은 취소 건을 재시도할 때는 처음 조회한 누계와 같은 키를 그대로 쓴다(재시도 중 누계가 바뀌었다고 키를 바꾸지 않는다 — 불확실하면 먼저 조회).
 - 키 문자는 보이는 ASCII(`!`~`~`)만 허용(우리 쪽 안전 제약; 토스 문서의 문자 제한은 미확인).
 - 키는 로그에 남겨도 비밀이 아니지만 시크릿키·Authorization 헤더는 절대 로그에 남기지 않는다.
+
+## 4-1. 키 종류·입력 규칙(2026-10-17 보강)
+- **키 종류 고정**: `TossConfig.expectedMode`(`"test"`|`"live"`)를 지정하면 모든 호출 전에 시크릿키 접두사(`test_sk_`·`live_sk_`, 위젯 키 `gsk`)를 검사해 다르면 `KEY_MODE_MISMATCH` 를 던진다(네트워크 호출 없음, 메시지에 키 없음). **운영 앱은 `expectedMode:"live"`, 스테이징·리허설은 `"test"` 로 반드시 지정한다.** 지정하지 않으면 검사하지 않는다(하위호환). 접두사 형식은 토스 문서 기준 관례이며 다른 형식의 키는 `null`(지정 시 거부).
+- `paymentKey` 는 1~200자 보이는 ASCII, `cancelReason` 은 비어 있으면 안 됨(200자는 코드포인트 기준 절단), `timeoutMs` 는 양의 유한수가 아니면 기본 15초.
+- 취소 옵션: 부분 취소의 `taxFreeAmount`(면세·복합과세 상점, 0 이상 취소금액 이하 정수), 가상계좌 결제 취소의 `refundReceiveAccount`(은행 코드·숫자 20자 이하 계좌·예금주 60자 이하). 토스 취소 API 의 `refundableAmount` 는 공식 문서상 **DEPRECATED** 라 지원하지 않는다 — 동시 부분 취소는 앱이 결제 단위로 직렬화하고 `alreadyCanceledTotal` 을 취소 직전 조회로 만든다.
+- `TossPayment` 가 읽는 추가 필드: `currency`·`taxFreeAmount`·`suppliedAmount`·`vat`·`secret`·`virtualAccount`. `interpretPayment` 는 통화가 KRW 가 아니면 `mismatch`.
+- `cancelApprovedMismatch(cfg, outcome)` / `client.cancelApprovedMismatch`: `approved_mismatch` 결제를 **표준 전액 취소 키**로 취소하는 호출 통일 도우미. 취소할지(자동/사람 확인 후)는 앱이 정한다(§5-6).
 
 ## 5. 앱이 DB 에 반영할 때 지킬 규칙
 1. **불확실(`uncertain`·`processing`·`already_done`·`approved_mismatch`)은 FAILED 로 확정하지 않는다.** PENDING(또는 pending 테이블 행)을 유지하고 `getPaymentByOrderId` → `interpretPayment` 로 확정한다. FAILED 로 한 번 굳으면 승인이 실제로 됐어도 되살릴 수 없다(shipping 점검표 P1).
@@ -129,7 +141,8 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - 승인 유효 시간: 승인 API 문서 10분 vs Payment 객체 `EXPIRED` 설명 30분(shipping 점검표 인용, 이번에 재확인 안 함).
 - `FORBIDDEN_CONSECUTIVE_REQUEST` 가 confirm 에서 오는지: 문서는 조회·취소에만 기재 → confirm 에서는 모르는 코드로 보아 `uncertain`.
 - 429 의 실제 발생·재시도 정책, 승인 직후 주문번호 조회의 반영 지연, paymentKey 최대 길이, 멱등키 허용 문자.
-- 웹훅(`PAYMENT_STATUS_CHANGED`)은 범위 밖. 서명 검증 방법이 문서에 없다(shipping 점검표).
+- 웹훅 수신 자체(서버 라우트)는 범위 밖. 진위 대조는 §8 의 `isWebhookSecretValid` 로 제공(공식 Payment.secret 설명 근거; 웹훅 가이드 페이지에는 검증 절차가 없어 헤더 서명은 확인 못 함).
+- **키가 필요한 실호출 미시험(2026-10-17 갱신)**: Test-Code 헤더 회귀·실결제 `ALREADY_PROCESSED_PAYMENT`·실제 409 / 멱등키 재생이 에러 응답도 재생하는지·15일 이후 / 429·`FORBIDDEN_CONSECUTIVE_REQUEST` 실발생 / 같은 orderId 다른 금액의 실제 거절 코드 / 승인 직후 주문 조회 지연 / paymentKey 최대 길이 / 면세 결제의 부분 취소·`taxFreeAmount` 동작 / 가상계좌 발급·환불·입금 웹훅의 secret 대조 / 5xx 본문 형태. 시험 195건은 모두 가짜 fetch 다.
 - 에러 코드 페이지 전체 목록 중 이번에 분류한 것 외의 코드(가상계좌·자동결제 전용 등)는 모두 `uncertain`(승인) 쪽으로 떨어진다 — 더 정확히 하려면 코드 추가 필요.
 - `INVALID_REQUEST`(400)는 에러 코드 페이지의 결제 승인 섹션에서 확인(메시지: 잘못된 요청). 다만 "결제가 일어나지 않았다"는 보장은 문서에 명시돼 있지 않다 — 400 계열이라 거절로 보고 fatal 에 넣었다(판단). 페이지가 일부 잘렸을 수 있어(열람 도구 표시) 다른 코드가 빠졌을 수 있음.
 - 위험(문서 근거 없음): confirm 의 `INVALID_REQUEST` 는 "결제가 일어나지 않았다"는 보장이 토스 문서에 없다. 승인이 이미 처리된 뒤 같은 요청이 `INVALID_REQUEST` 로 거절되는 경우(예: 이미 사용된 paymentKey 형식 문제)가 있는지 미확인 → 앱은 `fatal` 로 FAILED 확정하기 전에 `getPaymentByOrderId` 로 한 번 확인하는 것이 안전하다(비용 작음). 요청 값은 호출 전 검증(금액·orderId)으로 이미 걸러진다.
@@ -138,3 +151,9 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - 에러 응답의 멱등키 재생 여부(§4)는 미확인(안전 쪽 가정: 재생됨).
 - `TossPayment` 는 현재 method 외의 카드 정보·영수증 URL 등을 포함하지 않는다(필요해지면 추가).
 - 모든 동작은 fetch 모의로만 검증, 실제 토스 호출·테스트 키 검증 없음.
+
+## 8. 가상계좌·웹훅 (2026-10-17 추가)
+- 가상계좌 승인은 `waiting_for_deposit` 으로 온다(승인 완료 아님). 앱은 `payment.virtualAccount`(계좌·은행·기한)를 안내하고 PENDING 을 유지한다.
+- 웹훅은 **신호일 뿐**이다: 수신 → `paymentKey`/`orderId` 로 `getPayment` 조회 → `isWebhookSecretValid(payment.secret, 웹훅본문.secret)` 로 진위 대조 → `interpretPayment` 로 상태 확정. 웹훅 본문의 상태값으로 DB 를 바꾸지 않는다. `secret` 은 로그·저장 금지.
+- 가상계좌 취소는 `refundReceiveAccount` 필수(입금 전 취소는 해당 없을 수 있음 — 미확인). 환불 진행은 `payment.virtualAccount.refundStatus`·`cancels[].cancelStatus` 로 확인.
+- 이벤트 종류(`PAYMENT_STATUS_CHANGED`·`DEPOSIT_CALLBACK`·`CANCEL_STATUS_CHANGED` 등)는 토스 웹훅 가이드 참고. 이 모듈은 수신 라우트·재시도 응답(10초 내 200)을 다루지 않는다.
