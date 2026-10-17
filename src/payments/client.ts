@@ -26,7 +26,8 @@ function assertPaymentKey(paymentKey: string): string {
 }
 
 async function call(cfg: TossConfig, method: "GET" | "POST", path: string, opts: { body?: unknown; idempotencyKey?: string } = {}): Promise<Raw> {
-  if (cfg.expectedMode) assertKeyMode(cfg.secretKey, cfg.expectedMode);
+  if (!cfg.expectedMode) throw new Error("KEY_MODE_REQUIRED: expectedMode(\"test\"|\"live\") 를 지정해야 한다. 접두사 없는 모의 키는 \"unchecked\".");
+  if (cfg.expectedMode !== "unchecked") assertKeyMode(cfg.secretKey, cfg.expectedMode);
 
   const timeoutMs = typeof cfg.timeoutMs === "number" && Number.isFinite(cfg.timeoutMs) && cfg.timeoutMs > 0 ? cfg.timeoutMs : TOSS_TIMEOUT_MS;
   const ctrl = new AbortController();

@@ -98,7 +98,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - 키는 로그에 남겨도 비밀이 아니지만 시크릿키·Authorization 헤더는 절대 로그에 남기지 않는다.
 
 ## 4-1. 키 종류·입력 규칙(2026-10-17 보강)
-- **키 종류 고정**: `TossConfig.expectedMode`(`"test"`|`"live"`)를 지정하면 모든 호출 전에 시크릿키 접두사(`test_sk_`·`live_sk_`, 위젯 키 `gsk`)를 검사해 다르면 `KEY_MODE_MISMATCH` 를 던진다(네트워크 호출 없음, 메시지에 키 없음). **운영 앱은 `expectedMode:"live"`, 스테이징·리허설은 `"test"` 로 반드시 지정한다.** 지정하지 않으면 검사하지 않는다(하위호환). 접두사 형식은 토스 문서 기준 관례이며 다른 형식의 키는 `null`(지정 시 거부).
+- **키 종류 고정(필수, 2026-10-17 변경)**: `TossConfig.expectedMode`(`"test"`|`"live"`)는 **필수**다. 모든 호출 전에 시크릿키 접두사(`test_sk_`·`live_sk_`, 위젯 키 `gsk`)를 검사해 다르면 `KEY_MODE_MISMATCH`, 생략하면(JS 포함) `KEY_MODE_REQUIRED` 를 던진다(네트워크 호출 없음, 메시지에 키 없음). **운영 앱은 `"live"`, 스테이징·리허설은 `"test"`.** 접두사 없는 가짜 키로 모의 서버(`baseUrl`)·단위 시험을 돌릴 때만 `"unchecked"`. 선택 이유: 선택 사항이면 지정을 잊은 앱에서 운영에 test 키가 들어가도 아무도 막지 못한다(결제는 DONE 인데 돈이 없음). 앱 영향: 이 모듈은 아직 두 앱이 쓰지 않으므로(둘 다 v0.2.2 고정) 전환 시점부터 적용되며, **rc.1 대비 타입 breaking**(필수 필드 추가)이다.
 - `paymentKey` 는 1~200자 보이는 ASCII, `cancelReason` 은 비어 있으면 안 됨(200자는 코드포인트 기준 절단), `timeoutMs` 는 양의 유한수가 아니면 기본 15초.
 - 취소 옵션: 부분 취소의 `taxFreeAmount`(면세·복합과세 상점, 0 이상 취소금액 이하 정수), 가상계좌 결제 취소의 `refundReceiveAccount`(은행 코드·숫자 20자 이하 계좌·예금주 60자 이하). 토스 취소 API 의 `refundableAmount` 는 공식 문서상 **DEPRECATED** 라 지원하지 않는다 — 동시 부분 취소는 앱이 결제 단위로 직렬화하고 `alreadyCanceledTotal` 을 취소 직전 조회로 만든다.
 - `TossPayment` 가 읽는 추가 필드: `currency`·`taxFreeAmount`·`suppliedAmount`·`vat`·`secret`·`virtualAccount`. `interpretPayment` 는 통화가 KRW 가 아니면 `mismatch`.

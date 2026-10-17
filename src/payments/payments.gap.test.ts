@@ -32,7 +32,7 @@ const mk = (...rs: Array<Response | Error>) => {
 
   return { fetch: f as unknown as typeof fetch, f };
 };
-const cfgOf = (m: ReturnType<typeof mk>, extra = {}) => ({ secretKey: SECRET, fetch: m.fetch, ...extra });
+const cfgOf = (m: ReturnType<typeof mk>, extra = {}) => ({ secretKey: SECRET, fetch: m.fetch, expectedMode: "test" as const, ...extra });
 const sentBody = (m: ReturnType<typeof mk>) => JSON.parse(((m.f.mock.calls[0] as unknown as [string, RequestInit])[1].body as string) ?? "{}");
 
 describe("키 종류(test/live) 검사", () => {
@@ -55,11 +55,13 @@ describe("키 종류(test/live) 검사", () => {
     expect(() => assertKeyMode("weird", "test")).toThrow(/KEY_MODE_MISMATCH/);
   });
 
-  it("expectedMode 가 맞거나 없으면 정상 호출", async () => {
+  it("expectedMode 가 맞으면 정상 호출, 생략하면 KEY_MODE_REQUIRED, unchecked 는 접두사 없는 모의 키 허용", async () => {
     const ok = mk(resp(pay()), resp(pay()));
 
     expect(await getPayment(cfgOf(ok, { expectedMode: "test" }), PK)).toMatchObject({ kind: "found" });
-    expect(await getPayment(cfgOf(ok), PK)).toMatchObject({ kind: "found" });
+    await expect(getPayment({ secretKey: SECRET, fetch: ok.fetch } as never, PK)).rejects.toThrow(/KEY_MODE_REQUIRED/);
+    expect(await getPayment({ secretKey: "fake", fetch: ok.fetch, expectedMode: "unchecked" }, PK)).toMatchObject({ kind: "found" });
+    expect(ok.f).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -37,7 +37,7 @@ const mk = (...rs: Array<Response | Error>) => {
 
   return { fetch: f as unknown as typeof fetch, f };
 };
-const cfgOf = (m: ReturnType<typeof mk>, extra = {}) => ({ secretKey: SECRET, fetch: m.fetch, ...extra });
+const cfgOf = (m: ReturnType<typeof mk>, extra = {}) => ({ secretKey: SECRET, fetch: m.fetch, expectedMode: "test" as const, ...extra });
 const confirm = (m: ReturnType<typeof mk>, amount = 10000) => confirmPayment(cfgOf(m), { paymentKey: PK, orderId: OID, amount });
 const callInit = (m: ReturnType<typeof mk>, i = 0) => (m.f.mock.calls[i] as unknown as [string, RequestInit])[1];
 
@@ -124,7 +124,7 @@ describe("confirm 분류표", () => {
 
   it("uncertain: 타임아웃(응답이 안 오면 중단)", async () => {
     const hang = vi.fn((_u: string, init: RequestInit) => new Promise<Response>((_res, rej) => init.signal!.addEventListener("abort", () => rej(new DOMException("aborted", "AbortError")))));
-    const r = await confirmPayment({ secretKey: SECRET, fetch: hang as unknown as typeof fetch, timeoutMs: 20 }, { paymentKey: PK, orderId: OID, amount: 10000 });
+    const r = await confirmPayment({ secretKey: SECRET, fetch: hang as unknown as typeof fetch, expectedMode: "test", timeoutMs: 20 }, { paymentKey: PK, orderId: OID, amount: 10000 });
 
     expect(r).toMatchObject({ kind: "uncertain", code: "TIMEOUT" });
   });

@@ -9,8 +9,12 @@ export interface TossConfig {
   baseUrl?: string;
   /** 호출 제한 시간(ms). 양의 유한수가 아니면 기본값을 쓴다. 기본 15000 */
   timeoutMs?: number;
-  /** 이 환경이 쓸 키 종류. 지정하면 키 접두사(test_/live_)와 다를 때 네트워크 호출 전에 KEY_MODE_MISMATCH 를 던진다. 운영=live, 스테이징·리허설=test 로 지정할 것. */
-  expectedMode?: TossKeyMode;
+  /**
+   * **필수.** 이 환경이 쓸 키 종류. 시크릿키 접두사(test_/live_)와 다르면 네트워크 호출 전에 KEY_MODE_MISMATCH 를 던진다.
+   * 운영=`"live"`, 스테이징·리허설=`"test"`. 생략(JS 호출 포함)하면 KEY_MODE_REQUIRED 를 던진다.
+   * `"unchecked"` 는 접두사가 없는 가짜 키로 모의 서버(baseUrl)·단위 시험을 돌릴 때만 쓴다(운영 코드에서 쓰지 않는다).
+   */
+  expectedMode: TossKeyMode | "unchecked";
 }
 
 export type TossKeyMode = "test" | "live";
