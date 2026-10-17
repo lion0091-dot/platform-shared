@@ -66,9 +66,23 @@ describe("잘못된/모순된 code + 상태 조합", () => {
   });
 });
 
-describe("401/403 가 HTML 로 올 때 (결정: 401=fatal, 403=uncertain)", () => {
-  it("401 HTML → fatal(HTTP_401): 키 오류 알림을 늦추지 않는다", async () => {
-    expect(await confirm(mk(html(401)))).toMatchObject({ kind: "fatal", code: "HTTP_401" });
+describe("401/403 가 HTML 로 올 때 (결정: 승인 401=uncertain, 조회·취소 401=fatal, 403=uncertain)", () => {
+  it("승인 경로의 본문 없는 401(앞단 일시 인증 장애) → uncertain(HTTP_401): 승인된 결제를 FAILED 로 굳히지 않는다", async () => {
+    expect(await confirm(mk(html(401)))).toMatchObject({ kind: "uncertain", code: "HTTP_401" });
+  });
+
+  it("일시 401 시나리오: 승인 401 → 조회로 DONE 확인(paid)", async () => {
+    const m = mk(html(401), resp(pay()));
+    const c = await confirm(m);
+
+    expect(c.kind).toBe("uncertain");
+
+    const l = await getPaymentByOrderId(cfgOf(m), OID);
+
+    expect(l.kind).toBe("found");
+  });
+
+  it("조회·취소 경로의 본문 없는 401 → fatal(HTTP_401): 키 오류 알림을 늦추지 않는다", async () => {
     expect(await getPayment(cfgOf(mk(html(401))), PK)).toMatchObject({ kind: "fatal", code: "HTTP_401" });
     expect(await cancelPayment(cfgOf(mk(html(401))), { paymentKey: PK, cancelReason: "x", idempotencyKey: cancelIdempotencyKey({ paymentKey: PK }) })).toMatchObject({ kind: "fatal", code: "HTTP_401" });
   });
@@ -77,7 +91,7 @@ describe("401/403 가 HTML 로 올 때 (결정: 401=fatal, 403=uncertain)", () =
     expect(await confirm(mk(html(403)))).toMatchObject({ kind: "uncertain", code: "HTTP_403" });
   });
 
-  it("JSON 본문이 있는 401 UNAUTHORIZED_KEY 는 기존대로 fatal", async () => {
+  it("JSON 본문이 있는 401 UNAUTHORIZED_KEY 는 승인에서도 fatal", async () => {
     expect(await confirm(mk(resp({ code: "UNAUTHORIZED_KEY", message: "m" }, 401)))).toMatchObject({ kind: "fatal", code: "UNAUTHORIZED_KEY" });
   });
 });

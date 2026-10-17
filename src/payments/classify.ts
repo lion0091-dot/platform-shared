@@ -95,9 +95,11 @@ export function classifyTossError(op: Op, httpStatus: number, code: string): Err
     if (code === "NOT_AVAILABLE_BANK") return "retry_later";
   }
 
-  // JSON 본문 없는 401(HTTP_401: 프록시·게이트웨이가 돌려준 인증 실패)은 인증 단계에서 막혀 요청이 처리되지 않았으므로 키 오류로 보고 fatal(운영 알림 지연 방지).
-  // 본문 없는 403(HTTP_403)은 차단 원인을 알 수 없어 uncertain 으로 두고 code 가 HTTP_ 로 시작하면 앱이 알림을 낸다.
-  if (code === "HTTP_401") return "fatal";
+  // JSON 본문 없는 401(HTTP_401: 프록시·게이트웨이가 돌려준 인증 장애)의 분류는 연산마다 다르다.
+  //  - 조회·취소: fatal(키 오류 알림 지연 방지). 조회는 상태를 바꾸지 않고, 취소는 실패해도 재시도·사람 처리로 복구된다.
+  //  - 승인: uncertain. 앞단의 일시 인증 장애가 승인 처리 뒤의 응답 경로에서 나면 이미 승인된 결제를 FAILED 로 굳히는(고아) 사고가 되므로 조회로 확정한다.
+  //    키 오류 알림은 code 가 HTTP_401 로 남아 있으니 앱이 이 코드를 알림 대상으로 삼는다(JSON 본문이 있는 UNAUTHORIZED_KEY 는 승인에서도 fatal).
+  if (code === "HTTP_401" && op !== "confirm") return "fatal";
 
   if (op !== "confirm" && code === "FORBIDDEN_CONSECUTIVE_REQUEST") return "retry_later";
   if (httpStatus === 429) return op === "confirm" ? "uncertain" : "retry_later";

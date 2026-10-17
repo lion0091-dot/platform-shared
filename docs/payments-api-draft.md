@@ -51,7 +51,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 
 참고: 2026-10-17 에 공식 에러 코드 페이지 승인 섹션을 다시 열람해 한도·횟수·시간대·인증·계정 계열(`EXCEED_MAX_*`·`NOT_ALLOWED_POINT_USE`·`BELOW_MINIMUM_AMOUNT`·`NOT_AVAILABLE_PAYMENT`·`NOT_AVAILABLE_BANK`·`INVALID_PASSWORD` 등)을 `DEFINITE_FAILURE` 에 추가했다. **`FDS_ERROR`(403)는 `uncertain`**: 위험거래 감지 뒤 "발송된 문자 링크로 본인인증 후 결제가 가능"하다고 안내되므로(출처 https://docs.tosspayments.com/reference/error-codes, 2026-10-17 열람) 이어서 승인될 수 있다 → PENDING 유지 후 조회로 확정(고아 결제 방지). `UNAPPROVED_ORDER_ID`·`CARD_PROCESSING_ERROR`·`UNKNOWN_PAYMENT_ERROR`(500) 는 "결제 안 됨" 보장이 없어 `uncertain` 유지.
 
-**JSON 본문 없는 401/403(프록시·WAF 의 HTML 등)** (2026-10-17 결정): `HTTP_401` → `fatal`(인증 단계에서 막혀 처리되지 않았으므로 키 오류로 보고 즉시 알림), `HTTP_403` → `uncertain`(차단 원인 불명 → 실패로 굳히지 않음; 앱은 `code` 가 `HTTP_` 로 시작하는 결과를 운영 알림 대상으로 삼는다). 5xx 는 확정 거절 코드를 달고 와도 `uncertain`, 본문을 읽다 끊기면 `BAD_RESPONSE`/`HTTP_상태` 로 `uncertain`.
+**JSON 본문 없는 401/403(프록시·WAF 의 HTML 등)** (2026-10-17 결정, 고아 결제 방지 우선): **승인**의 `HTTP_401` → `uncertain`(앞단의 일시 인증 장애로 이미 승인된 결제를 FAILED 로 굳히지 않는다 → 조회로 확정), **조회·취소**의 `HTTP_401` → `fatal`(키 오류 알림 지연 방지). `HTTP_403` → 어느 경로든 `uncertain`. 앱은 `code` 가 `HTTP_401`/`HTTP_403` 인 결과를 **운영 알림 대상**으로 삼는다(JSON 본문이 있는 `UNAUTHORIZED_KEY` 는 승인에서도 `fatal`). 5xx 는 확정 거절 코드를 달고 와도 `uncertain`, 본문을 읽다 끊기면 `BAD_RESPONSE`/`HTTP_상태` 로 `uncertain`.
 
 **"결제 안 됨" 보장이 없는 코드(`CARD_PROCESSING_ERROR`·`UNAPPROVED_ORDER_ID`·`UNKNOWN_PAYMENT_ERROR`·`FDS_ERROR`·모르는 코드)는 `uncertain` 으로 두고, 앱은 `getPaymentByOrderId` 결과가 `ABORTED`/`EXPIRED`(`interpretPayment`=`not_paid`)이면 그때 실패로 닫는다**(`DONE` 이면 완료 반영, 진행 중이면 PENDING 유지 후 재조회, 앱 만료 시각이 지나도 계속 `in_progress` 이면 운영 알림). 코드를 보고 바로 FAILED 로 굳히지 않는다 — 고아 결제 방지.
 
