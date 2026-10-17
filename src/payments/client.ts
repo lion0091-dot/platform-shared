@@ -263,6 +263,13 @@ export async function cancelPayment(cfg: TossConfig, input: CancelInput): Promis
 
     const c = classifyTossError("cancel", r.status, r.code);
 
+    // NOT_CANCELABLE_AMOUNT: 첫 취소 응답을 잃은 뒤 (다른 키로) 다시 취소하면 이미 취소된 금액이라 이 코드가 온다. "사람 처리"로 넘기기 전에 조회로 이미 반영됐는지 확인한다.
+    if (c === "not_cancelable" && r.code === "NOT_CANCELABLE_AMOUNT") {
+      const done = await findAppliedCancel(cfg, input);
+
+      if (done) return { kind: "canceled", payment: done, alreadyCanceled: true };
+    }
+
     if (c === "already_canceled") {
       const l = await getPayment(cfg, input.paymentKey);
 
@@ -351,4 +358,17 @@ export async function checkPartialCancel(cfg: TossConfig, input: Pick<CancelInpu
   if (cur === before + input.cancelAmount) return { kind: "applied", payment: l.payment, currentCanceledTotal: cur };
 
   return { kind: cur === before ? "not_applied" : "diverged", payment: l.payment, currentCanceledTotal: cur };
+}
+
+/** 이 취소 요청이 이미 토스에 반영돼 있으면 그 결제를 돌려준다(전액: 완전 취소 상태, 부분: 현재 누계 === 요청 전 누계 + 금액). 조회 실패·불명이면 null. */
+async function findAppliedCancel(cfg: TossConfig, input: CancelInput): Promise<TossPayment | null> {
+  if (input.cancelAmount === undefined) {
+    const l = await getPayment(cfg, input.paymentKey);
+
+    return l.kind === "found" && isFullyCanceled(l.payment) ? l.payment : null;
+  }
+
+  const chk = await checkPartialCancel(cfg, input);
+
+  return chk.kind === "applied" ? chk.payment : null;
 }

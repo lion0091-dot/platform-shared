@@ -133,6 +133,7 @@ export interface CancelInput {
  *                 부분 취소 응답의 누계가 기대와 다르면(`CANCEL_NOT_APPLIED`·`CANCEL_TOTAL_MISMATCH`) 모듈이 이미 조회해 `currentCanceledTotal`(토스 기준 현재 누계)을 채운다
  *                 → 같은 키로 되풀이하지 말고(첫 응답만 재생된다) 그 값을 alreadyCanceledTotal 로 새 키(cancelIdempotencyKey)를 만들어 필요한 만큼만 다시 취소
  * not_cancelable  NOT_CANCELABLE_*·EXCEED_MAX_REFUND_DUE·EXCEED_CANCEL_LIMIT·REFUND_REJECTED·부분환불 불가 등 → 재시도 금지, 사람이 처리
+ *                 단 NOT_CANCELABLE_AMOUNT 는 모듈이 먼저 조회해 이미 반영된 취소(응답 유실 뒤 재취소)면 `canceled`(alreadyCanceled:true)로 돌려준다 — 그래도 not_cancelable 이면 사람이 처리
  * fatal           키 오류·권한 등
  */
 export type CancelOutcome =
