@@ -51,6 +51,8 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 
 참고: 2026-10-17 에 공식 에러 코드 페이지 승인 섹션을 다시 열람해 한도·횟수·시간대·인증·계정 계열(`EXCEED_MAX_*`·`NOT_ALLOWED_POINT_USE`·`BELOW_MINIMUM_AMOUNT`·`NOT_AVAILABLE_PAYMENT`·`NOT_AVAILABLE_BANK`·`INVALID_PASSWORD` 등)을 `DEFINITE_FAILURE` 에 추가했다. **`FDS_ERROR`(403)는 `uncertain`**: 위험거래 감지 뒤 "발송된 문자 링크로 본인인증 후 결제가 가능"하다고 안내되므로(출처 https://docs.tosspayments.com/reference/error-codes, 2026-10-17 열람) 이어서 승인될 수 있다 → PENDING 유지 후 조회로 확정(고아 결제 방지). `UNAPPROVED_ORDER_ID`·`CARD_PROCESSING_ERROR`·`UNKNOWN_PAYMENT_ERROR`(500) 는 "결제 안 됨" 보장이 없어 `uncertain` 유지.
 
+**"결제 안 됨" 보장이 없는 코드(`CARD_PROCESSING_ERROR`·`UNAPPROVED_ORDER_ID`·`UNKNOWN_PAYMENT_ERROR`·`FDS_ERROR`·모르는 코드)는 `uncertain` 으로 두고, 앱은 `getPaymentByOrderId` 결과가 `ABORTED`/`EXPIRED`(`interpretPayment`=`not_paid`)이면 그때 실패로 닫는다**(`DONE` 이면 완료 반영, 진행 중이면 PENDING 유지 후 재조회, 앱 만료 시각이 지나도 계속 `in_progress` 이면 운영 알림). 코드를 보고 바로 FAILED 로 굳히지 않는다 — 고아 결제 방지.
+
 참고: shipping 의 가짜 코드 `REJECT_CARD` 는 없다. 실제 코드는 `REJECT_CARD_PAYMENT`·`REJECT_CARD_COMPANY` 다(`REJECT_CARD_PAYMENT` 는 승인 API 섹션에만 있고 "전체 에러 목록"에는 없음 — 문서 내부 차이).
 
 ### 3.2 조회 결과 판정(불확실 → 확정)

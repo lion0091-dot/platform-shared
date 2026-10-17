@@ -10,6 +10,7 @@ import {
   confirmPayment,
   createTossClient,
   getPayment,
+  getPaymentByOrderId,
   interpretPayment,
   isWebhookSecretValid,
   tossKeyMode,
@@ -379,5 +380,19 @@ describe("balanceAmount 없는 PARTIAL_CANCELED 의 완전 취소 판정", () =>
     const m = mk(resp(pay({ status: "PARTIAL_CANCELED", cancels: [{ cancelAmount: 10000 }] })));
 
     expect(await cancelPayment(cfgOf(m), { paymentKey: PK, cancelReason: "x", idempotencyKey: cancelIdempotencyKey({ paymentKey: PK }) })).toMatchObject({ kind: "canceled", alreadyCanceled: false });
+  });
+});
+
+describe("보장 없는 코드는 uncertain 으로 두고 조회로 닫는다", () => {
+  it.each(["CARD_PROCESSING_ERROR", "UNAPPROVED_ORDER_ID", "UNKNOWN_PAYMENT_ERROR", "FDS_ERROR"])("%s → uncertain, 조회가 ABORTED 면 not_paid(실패 확정 가능)", async (code) => {
+    const status = code === "UNKNOWN_PAYMENT_ERROR" ? 500 : code === "FDS_ERROR" ? 403 : 400;
+    const m = mk(resp({ code, message: "m" }, status), resp(pay({ status: "ABORTED" })));
+    const c = await confirmPayment(cfgOf(m), { paymentKey: PK, orderId: OID, amount: 10000 });
+
+    expect(c.kind).toBe("uncertain");
+
+    const l = await getPaymentByOrderId(cfgOf(m), OID);
+
+    expect(l.kind === "found" && interpretPayment(l.payment, { orderId: OID, amount: 10000 })).toBe("not_paid");
   });
 });
