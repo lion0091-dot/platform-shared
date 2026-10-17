@@ -26,19 +26,28 @@ describe("웹훅 검증(verifyPaymentWebhook): 본문 상태는 믿지 않고 �
   const evt = (data: Record<string, unknown>, eventType = "PAYMENT_STATUS_CHANGED") => ({ eventType, createdAt: "2026-10-17T00:00:00", data });
 
   it("DEPOSIT_CALLBACK: secret 일치만 verified, 불일치·조회에 secret 없음은 거부", async () => {
-    expect(await verifyPaymentWebhook(cfgOf(mk(resp(pay({ secret: "s1" })))), dep("s1"))).toMatchObject({ kind: "verified", eventType: "DEPOSIT_CALLBACK", secretChecked: true });
+    expect(await verifyPaymentWebhook(cfgOf(mk(resp(pay({ secret: "s1" })))), dep("s1"))).toMatchObject({ kind: "authenticated", eventType: "DEPOSIT_CALLBACK" });
     expect(await verifyPaymentWebhook(cfgOf(mk(resp(pay({ secret: "s1" })))), dep("zz"))).toMatchObject({ kind: "rejected", reason: "SECRET_MISMATCH" });
     expect(await verifyPaymentWebhook(cfgOf(mk(resp(pay()))), dep("s1"))).toMatchObject({ kind: "rejected", reason: "SECRET_UNAVAILABLE" });
   });
 
-  it("PAYMENT_STATUS_CHANGED: 본문 status 는 무시하고 조회 결과를 쓴다(secret 둘 다 있으면 대조, 한쪽 null 이면 재조회만)", async () => {
-    const forged = evt({ paymentKey: PK, orderId: OID, status: "DONE", secret: null });
-    const r = await verifyPaymentWebhook(cfgOf(mk(resp(pay({ status: "ABORTED" })))), forged);
+  it("PAYMENT_STATUS_CHANGED: 본문 status 는 무시하고 조회 결과를 쓴다. 조회에 secret 이 없으면 refetched(진위 미확인), 있으면 일치할 때만 authenticated", async () => {
+    const noSecret = evt({ paymentKey: PK, orderId: OID, status: "DONE", secret: null });
+    const r = await verifyPaymentWebhook(cfgOf(mk(resp(pay({ status: "ABORTED" })))), noSecret);
 
-    expect(r).toMatchObject({ kind: "verified", secretChecked: false, payment: { status: "ABORTED" } });
-    expect(await verifyPaymentWebhook(cfgOf(mk(resp(pay({ secret: "s1" })))), evt({ paymentKey: PK, secret: "s1" }))).toMatchObject({ kind: "verified", secretChecked: true });
+    expect(r).toMatchObject({ kind: "refetched", payment: { status: "ABORTED" } });
+    expect(await verifyPaymentWebhook(cfgOf(mk(resp(pay({ secret: "s1" })))), evt({ paymentKey: PK, secret: "s1" }))).toMatchObject({ kind: "authenticated" });
     expect(await verifyPaymentWebhook(cfgOf(mk(resp(pay({ secret: "s1" })))), evt({ paymentKey: PK, secret: "bad" }))).toMatchObject({ kind: "rejected", reason: "SECRET_MISMATCH" });
-    expect(await verifyPaymentWebhook(cfgOf(mk(resp(pay({ status: "CANCELED" })))), evt({ orderId: OID }, "CANCEL_STATUS_CHANGED"))).toMatchObject({ kind: "verified", eventType: "CANCEL_STATUS_CHANGED" });
+    expect(await verifyPaymentWebhook(cfgOf(mk(resp(pay({ status: "CANCELED" })))), evt({ orderId: OID }, "CANCEL_STATUS_CHANGED"))).toMatchObject({ kind: "refetched", eventType: "CANCEL_STATUS_CHANGED" });
+  });
+
+  it("위조: data 만 넣고 secret 을 생략/빈 값으로 보내면 결제에 secret 이 있을 때 SECRET_MISSING 으로 거부(authenticated 가 되지 않음)", async () => {
+    for (const forged of [evt({ paymentKey: PK }), evt({ paymentKey: PK, secret: null }), evt({ paymentKey: PK, secret: "" })]) {
+      expect(await verifyPaymentWebhook(cfgOf(mk(resp(pay({ secret: "s1" })))), forged)).toMatchObject({ kind: "rejected", reason: "SECRET_MISSING" });
+    }
+
+    // 입금 웹훅은 secret 이 반드시 있어야 하고, 본문 secret 이 없으면 형식 이상으로 거부
+    expect(await verifyPaymentWebhook(cfgOf(mk(resp(pay({ secret: "s1" })))), { orderId: OID, status: "DONE" })).toMatchObject({ kind: "rejected", reason: "BAD_PAYLOAD" });
   });
 
   it("존재하지 않는 결제·형식 오류·본문 이상·조회 실패", async () => {

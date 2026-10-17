@@ -17,9 +17,17 @@ export function isWebhookSecretValid(paymentSecret: string | null | undefined, r
   return diff === 0;
 }
 
+/**
+ * authenticated  본문의 secret 이 토스 조회 결과의 secret 과 일치 → 토스가 보낸 요청임이 확인됨.
+ * refetched      secret 대조가 불가능(조회 결과에 secret 이 없음)해 **요청의 진위는 확인하지 못했다**. 재조회한 payment(토스가 직접 알려준 상태)만 믿을 수 있다.
+ *                앱은 이 값을 "인증됨"으로 쓰지 말고 payment 의 상태만 근거로 처리한다(요청이 위조여도 payment 는 사실이라 안전).
+ * rejected       본문 이상(BAD_PAYLOAD)·결제 없음(NOT_FOUND)·secret 불일치(SECRET_MISMATCH)·조회에는 secret 이 있는데 본문에 없음(SECRET_MISSING, 위조 의심)·입금 웹훅인데 조회에 secret 없음(SECRET_UNAVAILABLE)
+ * lookup_failed  토스 조회 실패(재시도 대상)
+ */
 export type WebhookCheck =
-  | { kind: "verified"; eventType: string; payment: TossPayment; secretChecked: boolean }
-  | { kind: "rejected"; reason: "BAD_PAYLOAD" | "NOT_FOUND" | "SECRET_MISMATCH" | "SECRET_UNAVAILABLE" }
+  | { kind: "authenticated"; eventType: string; payment: TossPayment }
+  | { kind: "refetched"; eventType: string; payment: TossPayment }
+  | { kind: "rejected"; reason: "BAD_PAYLOAD" | "NOT_FOUND" | "SECRET_MISMATCH" | "SECRET_MISSING" | "SECRET_UNAVAILABLE" }
   | { kind: "lookup_failed"; outcome: Exclude<LookupOutcome, { kind: "found" }> };
 
 const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
@@ -28,7 +36,7 @@ const str = (v: unknown): string | null => (typeof v === "string" && v.length > 
  * 결제 웹훅 진위·최신 상태 확인. **웹훅 본문의 상태값은 믿지 않는다** — 본문에서 paymentKey/orderId 만 꺼내 토스를 다시 조회하고, 그 결과(payment)만 근거로 쓴다.
  *  - DEPOSIT_CALLBACK(본문: orderId·secret·status·transactionKey): 주문번호로 조회 + secret 대조 필수. 조회 결과에 secret 이 없으면 SECRET_UNAVAILABLE 로 거부.
  *  - PAYMENT_STATUS_CHANGED·CANCEL_STATUS_CHANGED(본문: eventType·createdAt·data): data 의 paymentKey(없으면 orderId)로 조회. 서명 헤더는 없다(`tosspayments-webhook-signature` 는 지급대행·셀러 웹훅 전용).
- *    조회 결과와 data 양쪽에 secret 이 있으면 대조하고 다르면 거부, 어느 한쪽이 null 이면 대조 없이 재조회 결과만으로 확인(secretChecked:false).
+ *    조회 결과에 secret 이 있으면 data.secret 이 같아야 `authenticated`(없거나 다르면 거부). 조회 결과에 secret 이 없으면 대조할 수 없어 `refetched`(진위 미확인, 재조회한 payment 만 신뢰).
  * 추가 방어(권장): 웹훅 엔드포인트의 출발 IP 허용 목록(보안 가이드 안내 IP)과 HTTPS. 10초 안에 200 응답.
  */
 export async function verifyPaymentWebhook(cfg: TossConfig, body: unknown): Promise<WebhookCheck> {
@@ -67,12 +75,15 @@ export async function verifyPaymentWebhook(cfg: TossConfig, body: unknown): Prom
   if (isDeposit) {
     if (!known) return { kind: "rejected", reason: "SECRET_UNAVAILABLE" };
 
-    return isWebhookSecretValid(known, received) ? { kind: "verified", eventType, payment: l.payment, secretChecked: true } : { kind: "rejected", reason: "SECRET_MISMATCH" };
+    return isWebhookSecretValid(known, received) ? { kind: "authenticated", eventType, payment: l.payment } : { kind: "rejected", reason: "SECRET_MISMATCH" };
   }
 
-  if (known && received) {
-    return isWebhookSecretValid(known, received) ? { kind: "verified", eventType, payment: l.payment, secretChecked: true } : { kind: "rejected", reason: "SECRET_MISMATCH" };
+  if (known) {
+    // 결제에 secret 이 있으면 정상 웹훅(data=Payment 객체)에도 있어야 한다. 없으면 위조 의심으로 거부한다.
+    if (!received) return { kind: "rejected", reason: "SECRET_MISSING" };
+
+    return isWebhookSecretValid(known, received) ? { kind: "authenticated", eventType, payment: l.payment } : { kind: "rejected", reason: "SECRET_MISMATCH" };
   }
 
-  return { kind: "verified", eventType, payment: l.payment, secretChecked: false };
+  return { kind: "refetched", eventType, payment: l.payment };
 }

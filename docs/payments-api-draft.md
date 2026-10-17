@@ -166,7 +166,10 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - 웹훅은 **신호일 뿐**이다: `verifyPaymentWebhook(cfg, 본문)` 이 본문에서 `paymentKey`/`orderId` 만 꺼내 토스를 **다시 조회**하고, 그 결과(`payment`)로 `interpretPayment` 해 상태를 확정한다. 웹훅 본문의 상태값으로 DB 를 바꾸지 않는다. `secret` 은 로그·저장 금지.
 - 공식 문서(https://docs.tosspayments.com/reference/using-api/webhook-events, 2026-10-17 열람) 기준 진위 확인:
   - `DEPOSIT_CALLBACK`(본문 최상위 `orderId`·`secret`·`status`·`transactionKey`): 본문 `secret` 이 결제의 `secret`(승인 응답·조회)과 같아야 정상. `verifyPaymentWebhook` 은 일치하지 않거나 조회 결과에 `secret` 이 없으면 거부(`SECRET_MISMATCH`/`SECRET_UNAVAILABLE`).
-  - `PAYMENT_STATUS_CHANGED`·`CANCEL_STATUS_CHANGED`(본문 `eventType`·`createdAt`·`data`=변경된 Payment/Cancel 객체): 서명 헤더 없음(`tosspayments-webhook-signature` 는 지급대행·셀러 웹훅 전용). `data.secret` 은 Payment 객체의 nullable 필드라, **양쪽에 있으면 대조하고 한쪽이 null 이면 대조 없이 재조회 결과만으로 확인**(`secretChecked:false`). 이 경우 보안의 근거는 "재조회 결과만 믿는다"이다(위조 웹훅은 조회가 바뀌지 않아 무효).
+  - `PAYMENT_STATUS_CHANGED`·`CANCEL_STATUS_CHANGED`(본문 `eventType`·`createdAt`·`data`=변경된 Payment/Cancel 객체): 서명 헤더 없음(`tosspayments-webhook-signature` 는 지급대행·셀러 웹훅 전용). `data.secret` 은 Payment 객체의 nullable 필드다. 결과는 둘로 나뉜다:
+    - `authenticated`: 재조회한 결제에 `secret` 이 있고 본문 `data.secret` 과 일치 → 토스가 보낸 요청.
+    - `refetched`: 재조회한 결제에 `secret` 이 없어 **대조 자체가 불가능** → 요청 진위는 미확인, 재조회한 `payment`(토스가 직접 알려준 상태)만 신뢰한다. **앱은 `refetched` 를 "인증됨"으로 쓰지 않는다**(위조된 요청이어도 `payment` 는 사실이라 DB 반영 근거로는 안전).
+    - 재조회 결과에 `secret` 이 있는데 본문에 없거나 비어 있으면 위조 의심으로 `SECRET_MISSING` 거부, 다르면 `SECRET_MISMATCH` 거부.
   - 추가 방어(앱): 웹훅 URL 에 HTTPS, 보안 가이드(https://docs.tosspayments.com/reference/using-api/security)의 출발 IP 허용 목록, 10초 안에 200 응답.
 - 가상계좌 취소는 `refundReceiveAccount` 필수(입금 전 취소는 해당 없을 수 있음 — 미확인). 환불 진행은 `payment.virtualAccount.refundStatus`·`cancels[].cancelStatus` 로 확인.
 - 이벤트 종류(`PAYMENT_STATUS_CHANGED`·`DEPOSIT_CALLBACK`·`CANCEL_STATUS_CHANGED` 등)는 토스 웹훅 가이드 참고. 이 모듈은 수신 라우트·재시도 응답(10초 내 200)을 다루지 않는다.
