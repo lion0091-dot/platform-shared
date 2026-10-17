@@ -129,7 +129,9 @@ export interface CancelInput {
  * canceled        취소 확인됨(응답 status CANCELED/PARTIAL_CANCELED, 또는 이미 취소돼 조회로 CANCELED 확인 — alreadyCanceled=true)
  * processing      취소 진행 중(ALREADY_REFUNDING_PAYMENT·409 IDEMPOTENT_REQUEST_PROCESSING) → 조금 뒤 조회
  * retry_later     FORBIDDEN_CONSECUTIVE_REQUEST·429 → 잠시 뒤 같은 키로 재시도
- * uncertain       결과 불명(PROVIDER_ERROR·5xx·타임아웃·ALREADY_* 인데 조회로 확인 못 함) → 조회 후 확정, 같은 키 유지
+ * uncertain       결과 불명(PROVIDER_ERROR·5xx·타임아웃·ALREADY_* 인데 조회로 확인 못 함) → 조회 후 확정, 같은 키 유지.
+ *                 부분 취소 응답의 누계가 기대와 다르면(`CANCEL_NOT_APPLIED`·`CANCEL_TOTAL_MISMATCH`) 모듈이 이미 조회해 `currentCanceledTotal`(토스 기준 현재 누계)을 채운다
+ *                 → 같은 키로 되풀이하지 말고(첫 응답만 재생된다) 그 값을 alreadyCanceledTotal 로 새 키(cancelIdempotencyKey)를 만들어 필요한 만큼만 다시 취소
  * not_cancelable  NOT_CANCELABLE_*·EXCEED_MAX_REFUND_DUE·EXCEED_CANCEL_LIMIT·REFUND_REJECTED·부분환불 불가 등 → 재시도 금지, 사람이 처리
  * fatal           키 오류·권한 등
  */
@@ -137,7 +139,7 @@ export type CancelOutcome =
   | { kind: "canceled"; payment: TossPayment; alreadyCanceled: boolean }
   | { kind: "processing"; code: string }
   | { kind: "retry_later"; code: string }
-  | { kind: "uncertain"; code: string; message: string }
+  | { kind: "uncertain"; code: string; message: string; currentCanceledTotal?: number }
   | { kind: "not_cancelable"; code: string; message: string }
   | { kind: "fatal"; code: string; message: string };
 
@@ -152,3 +154,16 @@ export type PaymentInterpretation =
   | "mismatch"; // 주문번호/금액이 기대와 다름 → 자동 확정 금지
 
 export type FailUrlKind = "user_canceled" | "aborted" | "card_rejected" | "other";
+
+/**
+ * checkPartialCancel 결과(부분 취소가 실제로 적용됐는지, 토스 조회 기준)
+ *  applied      현재 누계 === alreadyCanceledTotal + cancelAmount → 적용됨
+ *  not_applied  현재 누계 === alreadyCanceledTotal → 적용 안 됨(새 키로 다시 취소 가능)
+ *  diverged     그 밖(다른 경로가 먼저/같이 취소) → currentCanceledTotal 로 다시 계산해 새 키로, 또는 사람이 확인
+ *  unknown      조회 실패·누계 판단 불가
+ */
+export type PartialCancelCheck =
+  | { kind: "applied"; payment: TossPayment; currentCanceledTotal: number }
+  | { kind: "not_applied"; payment: TossPayment; currentCanceledTotal: number }
+  | { kind: "diverged"; payment: TossPayment; currentCanceledTotal: number }
+  | { kind: "unknown"; code: string; message: string };

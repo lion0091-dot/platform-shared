@@ -2,8 +2,8 @@ import { classifyTossError } from "./classify";
 import { assertIdempotencyKey, cancelIdempotencyKey, confirmIdempotencyKey } from "./idempotency";
 import { assertKeyMode } from "./keyMode";
 import { assertOrderId } from "./orderId";
-import { isFullyCanceled } from "./status";
-import type { CancelInput, CancelOutcome, ConfirmInput, ConfirmOutcome, LookupOutcome, TossCancel, TossConfig, TossPayment, TossVirtualAccount } from "./types";
+import { canceledTotal, isFullyCanceled } from "./status";
+import type { CancelInput, CancelOutcome, PartialCancelCheck, ConfirmInput, ConfirmOutcome, LookupOutcome, TossCancel, TossConfig, TossPayment, TossVirtualAccount } from "./types";
 
 const BASE_URL = "https://api.tosspayments.com";
 export const TOSS_TIMEOUT_MS = 15_000;
@@ -300,7 +300,18 @@ export async function cancelPayment(cfg: TossConfig, input: CancelInput): Promis
 
       if (ok) return { kind: "canceled", payment: p, alreadyCanceled: false };
 
-      return { kind: "uncertain", code: "CANCEL_NOT_APPLIED", message: "취소 응답의 취소 누계가 요청 금액만큼 늘지 않았습니다(같은 키의 이전 응답일 수 있음). 조회로 확인하세요." };
+      // 누계가 기대와 다르다: 호출자의 alreadyCanceledTotal 이 낡았거나 같은 키의 이전 응답이다. 조회로 현재 누계를 확인해 알려준다.
+      const chk = await checkPartialCancel(cfg, input);
+
+      if (chk.kind === "applied") return { kind: "canceled", payment: chk.payment, alreadyCanceled: false };
+      if (chk.kind === "unknown") return { kind: "uncertain", code: "CANCEL_NOT_APPLIED", message: `취소 응답의 취소 누계가 요청 금액만큼 늘지 않았고 조회로 확인하지 못했습니다(${chk.code}).` };
+
+      return {
+        kind: "uncertain",
+        code: chk.kind === "not_applied" ? "CANCEL_NOT_APPLIED" : "CANCEL_TOTAL_MISMATCH",
+        message: "취소 응답의 취소 누계가 요청 금액만큼 늘지 않았습니다. currentCanceledTotal 을 alreadyCanceledTotal 로 새 키를 만들어 다시 계산하세요.",
+        currentCanceledTotal: chk.currentCanceledTotal,
+      };
     }
   }
 
@@ -317,4 +328,27 @@ export function cancelApprovedMismatch(cfg: TossConfig, outcome: Extract<Confirm
     cancelReason: `주문·금액 불일치 승인 취소(${outcome.reason})`,
     idempotencyKey: idempotencyKey ?? cancelIdempotencyKey({ paymentKey: outcome.payment.paymentKey }),
   });
+}
+
+/**
+ * 부분 취소가 실제로 적용됐는지 토스 조회(getPayment)로 확인한다. 응답 유실·CANCEL_*·낡은 alreadyCanceledTotal 뒤에 같은 키를 되풀이하는 대신 쓴다.
+ * input 은 취소 요청과 같은 값(paymentKey·cancelAmount·alreadyCanceledTotal)이면 된다.
+ */
+export async function checkPartialCancel(cfg: TossConfig, input: Pick<CancelInput, "paymentKey" | "cancelAmount" | "alreadyCanceledTotal">): Promise<PartialCancelCheck> {
+  const before = input.alreadyCanceledTotal;
+
+  if (input.cancelAmount === undefined || !Number.isSafeInteger(input.cancelAmount) || input.cancelAmount <= 0 || typeof before !== "number" || !Number.isSafeInteger(before) || before < 0) {
+    throw new Error("INVALID_CANCELED_TOTAL: cancelAmount(양의 정수)와 alreadyCanceledTotal(0 이상 정수)이 필요하다.");
+  }
+
+  const l = await getPayment(cfg, input.paymentKey);
+
+  if (l.kind !== "found") return { kind: "unknown", code: "code" in l ? l.code : "LOOKUP_FAILED", message: "message" in l ? l.message : "조회로 확인하지 못했습니다." };
+
+  const cur = canceledTotal(l.payment);
+
+  if (cur === null) return { kind: "unknown", code: "NO_CANCEL_DATA", message: "조회 응답에서 취소 누계를 알 수 없습니다." };
+  if (cur === before + input.cancelAmount) return { kind: "applied", payment: l.payment, currentCanceledTotal: cur };
+
+  return { kind: cur === before ? "not_applied" : "diverged", payment: l.payment, currentCanceledTotal: cur };
 }

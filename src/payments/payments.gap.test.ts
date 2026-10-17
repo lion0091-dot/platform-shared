@@ -4,6 +4,8 @@ import {
   cancelApprovedMismatch,
   cancelIdempotencyKey,
   cancelPayment,
+  canceledTotal,
+  checkPartialCancel,
   classifyTossError,
   confirmPayment,
   createTossClient,
@@ -274,5 +276,46 @@ describe("secret 비노출", () => {
     expect(JSON.stringify(r)).not.toContain("whsec_hidden");
     expect(JSON.stringify({ ...r.payment })).not.toContain("whsec_hidden");
     expect(Object.keys(r.payment)).not.toContain("secret");
+  });
+});
+
+describe("부분 취소 누계 확인(낡은 alreadyCanceledTotal)", () => {
+  const part = (cum: number) => pay({ status: "PARTIAL_CANCELED", balanceAmount: 10000 - cum, cancels: [{ cancelAmount: cum }] });
+  const key = (n: number, t: number) => cancelIdempotencyKey({ paymentKey: PK, cancelAmount: n, alreadyCanceledTotal: t });
+  const run = (m: ReturnType<typeof mk>, before: number) => cancelPayment(cfgOf(m), { paymentKey: PK, cancelReason: "부분", cancelAmount: 3000, alreadyCanceledTotal: before, idempotencyKey: key(3000, before) });
+
+  it("호출자 누계가 낡음(다른 경로가 2000 먼저 취소): 응답 누계 5000 ≠ 기대 3000 → 조회 후 CANCEL_TOTAL_MISMATCH + currentCanceledTotal", async () => {
+    const r = await run(mk(resp(part(5000)), resp(part(5000))), 0);
+
+    expect(r).toMatchObject({ kind: "uncertain", code: "CANCEL_TOTAL_MISMATCH", currentCanceledTotal: 5000 });
+  });
+
+  it("응답은 이전 상태지만 조회로 이번 취소가 적용된 것이 확인되면 canceled", async () => {
+    const r = await run(mk(resp(part(0)), resp(part(3000))), 0);
+
+    expect(r).toMatchObject({ kind: "canceled", alreadyCanceled: false });
+  });
+
+  it("응답·조회 모두 누계가 그대로면 CANCEL_NOT_APPLIED + currentCanceledTotal", async () => {
+    const r = await run(mk(resp(part(1000)), resp(part(1000))), 1000);
+
+    expect(r).toMatchObject({ kind: "uncertain", code: "CANCEL_NOT_APPLIED", currentCanceledTotal: 1000 });
+  });
+
+  it("checkPartialCancel: applied·not_applied·diverged·unknown, 인자 오류는 던진다, canceledTotal 계산", async () => {
+    const c = (m: ReturnType<typeof mk>, before: number) => checkPartialCancel(cfgOf(m), { paymentKey: PK, cancelAmount: 3000, alreadyCanceledTotal: before });
+
+    expect((await c(mk(resp(part(3000))), 0)).kind).toBe("applied");
+    expect((await c(mk(resp(part(0))), 0)).kind).toBe("not_applied");
+    expect(await c(mk(resp(part(5000))), 0)).toMatchObject({ kind: "diverged", currentCanceledTotal: 5000 });
+    expect((await c(mk(new Error("down")), 0)).kind).toBe("unknown");
+    await expect(checkPartialCancel(cfgOf(mk()), { paymentKey: PK, cancelAmount: 3000 })).rejects.toThrow(/INVALID_CANCELED_TOTAL/);
+
+    const base = { status: "PARTIAL_CANCELED", totalAmount: 10000 };
+
+    expect(canceledTotal({ ...base, balanceAmount: 7000, cancels: [] })).toBe(3000);
+    expect(canceledTotal({ ...base, balanceAmount: null, cancels: [{ cancelAmount: 1000 }, { cancelAmount: 2000 }] as never })).toBe(3000);
+    expect(canceledTotal({ status: "CANCELED", totalAmount: 10000, balanceAmount: null, cancels: [] })).toBe(10000);
+    expect(canceledTotal({ ...base, balanceAmount: null, cancels: [] })).toBeNull();
   });
 });

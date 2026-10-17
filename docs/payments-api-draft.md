@@ -74,6 +74,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 | 200, 부분 요청(`cancelAmount`+`alreadyCanceledTotal`) → 응답 `cancels` 합 = 누계+이번 금액(그리고 `balanceAmount` 가 있으면 `totalAmount-balanceAmount` 도 같음) | `canceled`(`alreadyCanceled:false`) | DB 취소 반영 |
 | 200, 전액 요청 → status `PARTIAL_CANCELED` 이고 `balanceAmount===0` | `canceled`(`alreadyCanceled:false`) | DB 취소 반영 |
 | 200 인데 위 검증 불일치·확인할 `cancels`/`balanceAmount` 없음·전액 요청에 잔액이 남은 PARTIAL_CANCELED | `uncertain`(`CANCEL_NOT_APPLIED` 또는 `BAD_RESPONSE`) | 같은 키의 이전 응답(캐시)일 수 있음 → 환불을 두 번 한 것으로 기록하지 말고 `getPayment` 로 확인 |
+| (위 행의 후속) 부분 취소 응답 누계 불일치 | 모듈이 `getPayment` 로 현재 누계를 확인해 적용됐으면 `canceled`, 아니면 `uncertain`(`CANCEL_NOT_APPLIED`: 누계 그대로 / `CANCEL_TOTAL_MISMATCH`: 다른 경로가 먼저 취소) + **`currentCanceledTotal`** | 같은 키로 되풀이하지 않는다(첫 응답만 재생). `currentCanceledTotal` 을 `alreadyCanceledTotal` 로 새 키(`cancelIdempotencyKey`)를 만들어 필요한 만큼만 다시 취소. 응답 유실 뒤에는 `checkPartialCancel(cfg,{paymentKey,cancelAmount,alreadyCanceledTotal})` 로 `applied/not_applied/diverged/unknown` 을 확인 |
 | 400 `ALREADY_CANCELED_PAYMENT`·`ALREADY_REFUND_PAYMENT` → 라이브러리가 `paymentKey` 조회, CANCELED 확인 | `canceled`(`alreadyCanceled:true`) | 성공 취급, **DB 정리는 앱**(PG 는 취소·DB 는 PAID 인 불일치 해소) |
 | 위 두 코드인데 조회로 CANCELED 확인 못 함 | `uncertain` | 사람이 확인 |
 | 400 `ALREADY_REFUNDING_PAYMENT`, 409 `IDEMPOTENT_REQUEST_PROCESSING` | `processing` | 잠시 뒤 조회 |

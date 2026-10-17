@@ -5,3 +5,4 @@ export * from "./classify";
 export * from "./client";
 export * from "./keyMode";
 export * from "./webhook";
+export { canceledTotal } from "./status";
