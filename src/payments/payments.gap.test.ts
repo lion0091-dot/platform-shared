@@ -396,3 +396,15 @@ describe("보장 없는 코드는 uncertain 으로 두고 조회로 닫는다", 
     expect(l.kind === "found" && interpretPayment(l.payment, { orderId: OID, amount: 10000 })).toBe("not_paid");
   });
 });
+
+describe("부분 취소 ALREADY_CANCELED 누계 어긋남", () => {
+  const ac = () => resp({ code: "ALREADY_CANCELED_PAYMENT", message: "이미 취소된 결제 입니다." }, 400);
+  const input = (before: number, amt: number) => ({ paymentKey: PK, cancelReason: "x", cancelAmount: amt, alreadyCanceledTotal: before, idempotencyKey: cancelIdempotencyKey({ paymentKey: PK, cancelAmount: amt, alreadyCanceledTotal: before }) });
+
+  it("부분 취소 상태(전액 아님)에서 누계가 어긋난 ALREADY_CANCELED 는 currentCanceledTotal 이 담긴 uncertain(CANCEL_TOTAL_MISMATCH/NOT_APPLIED)", async () => {
+    const part = (cum: number) => pay({ status: "PARTIAL_CANCELED", balanceAmount: 10000 - cum, cancels: [{ cancelAmount: cum }] });
+
+    expect(await cancelPayment(cfgOf(mk(ac(), resp(part(5000)))), input(0, 3000))).toMatchObject({ kind: "uncertain", code: "CANCEL_TOTAL_MISMATCH", currentCanceledTotal: 5000 });
+    expect(await cancelPayment(cfgOf(mk(ac(), resp(part(2000)))), input(2000, 3000))).toMatchObject({ kind: "uncertain", code: "CANCEL_NOT_APPLIED", currentCanceledTotal: 2000 });
+  });
+});

@@ -285,6 +285,16 @@ export async function cancelPayment(cfg: TossConfig, input: CancelInput): Promis
         if (isFullyCanceled(l.payment)) {
           return { kind: "not_cancelable", code: r.code, message: "결제가 이미 전액 취소되어 이번 부분 취소가 적용됐는지 알 수 없습니다. 취소 이력(cancels)을 확인해 사람이 처리하세요." };
         }
+
+        // 일부만 취소된 상태에서 누계가 기대와 다르다(다른 경로가 먼저/같이 취소): 같은 키 재시도로는 풀리지 않는다 → 현재 누계를 알려 새 키로 다시 계산하게 한다.
+        if (cur !== null) {
+          return {
+            kind: "uncertain",
+            code: cur === input.alreadyCanceledTotal ? "CANCEL_NOT_APPLIED" : "CANCEL_TOTAL_MISMATCH",
+            message: "이미 취소됐다는 응답이지만 이번 부분 취소가 적용되지 않았습니다. currentCanceledTotal 을 alreadyCanceledTotal 로 새 키를 만들어 다시 계산하세요.",
+            currentCanceledTotal: cur,
+          };
+        }
       }
 
       return { kind: "uncertain", code: r.code, message: "이미 취소됐다는 응답이지만 조회로 취소 완료를 확인하지 못했습니다." };
