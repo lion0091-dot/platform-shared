@@ -273,9 +273,21 @@ export async function cancelPayment(cfg: TossConfig, input: CancelInput): Promis
     if (c === "already_canceled") {
       const l = await getPayment(cfg, input.paymentKey);
 
-      return l.kind === "found" && isFullyCanceled(l.payment)
-        ? { kind: "canceled", payment: l.payment, alreadyCanceled: true }
-        : { kind: "uncertain", code: r.code, message: "이미 취소됐다는 응답이지만 조회로 취소 완료를 확인하지 못했습니다." };
+      if (l.kind === "found" && input.cancelAmount === undefined) {
+        // 전액 요청: 이미 완전히 취소돼 있다
+        if (isFullyCanceled(l.payment)) return { kind: "canceled", payment: l.payment, alreadyCanceled: true };
+      } else if (l.kind === "found") {
+        // 부분 요청에 대한 ALREADY_CANCELED: "이미 취소된 결제"는 이번 부분 취소가 아니라 결제 전체의 상태다. 이번 요청의 효과인지 누계로 구분한다.
+        const cur = canceledTotal(l.payment);
+
+        if (cur !== null && cur === input.alreadyCanceledTotal! + input.cancelAmount!) return { kind: "canceled", payment: l.payment, alreadyCanceled: true };
+
+        if (isFullyCanceled(l.payment)) {
+          return { kind: "not_cancelable", code: r.code, message: "결제가 이미 전액 취소되어 이번 부분 취소가 적용됐는지 알 수 없습니다. 취소 이력(cancels)을 확인해 사람이 처리하세요." };
+        }
+      }
+
+      return { kind: "uncertain", code: r.code, message: "이미 취소됐다는 응답이지만 조회로 취소 완료를 확인하지 못했습니다." };
     }
 
     switch (c) {

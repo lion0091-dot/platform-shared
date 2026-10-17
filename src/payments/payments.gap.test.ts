@@ -342,3 +342,24 @@ describe("NOT_CANCELABLE_AMOUNT 는 조회로 이미 반영됐는지 먼저 확�
     expect(await cancelPayment(cfgOf(mk(nc(), new Error("down"))), { paymentKey: PK, cancelReason: "x", idempotencyKey: "k-full-2" })).toMatchObject({ kind: "not_cancelable", message: "취소 할 수 없는 금액 입니다." });
   });
 });
+
+describe("부분 취소 요청의 ALREADY_CANCELED 의미 분리", () => {
+  const ac = () => resp({ code: "ALREADY_CANCELED_PAYMENT", message: "이미 취소된 결제 입니다." }, 400);
+  const input = (before: number, amt: number) => ({ paymentKey: PK, cancelReason: "x", cancelAmount: amt, alreadyCanceledTotal: before, idempotencyKey: cancelIdempotencyKey({ paymentKey: PK, cancelAmount: amt, alreadyCanceledTotal: before }) });
+  const full = pay({ status: "PARTIAL_CANCELED", balanceAmount: 0, cancels: [{ cancelAmount: 10000 }] });
+
+  it("이번 부분 취소가 결제를 전액 취소시킨 경우(누계 일치)만 canceled(alreadyCanceled)", async () => {
+    expect(await cancelPayment(cfgOf(mk(ac(), resp(full))), input(4000, 6000))).toMatchObject({ kind: "canceled", alreadyCanceled: true });
+  });
+
+  it("다른 이유로 이미 전액 취소돼 이번 요청의 효과를 알 수 없으면 not_cancelable(사람 처리)", async () => {
+    expect(await cancelPayment(cfgOf(mk(ac(), resp(full))), input(0, 3000))).toMatchObject({ kind: "not_cancelable", code: "ALREADY_CANCELED_PAYMENT" });
+  });
+
+  it("조회가 부분 취소 상태이고 누계가 안 맞거나 조회 실패면 uncertain", async () => {
+    const part = pay({ status: "PARTIAL_CANCELED", balanceAmount: 5000, cancels: [{ cancelAmount: 5000 }] });
+
+    expect(await cancelPayment(cfgOf(mk(ac(), resp(part))), input(0, 3000))).toMatchObject({ kind: "uncertain" });
+    expect(await cancelPayment(cfgOf(mk(ac(), new Error("down"))), input(0, 3000))).toMatchObject({ kind: "uncertain" });
+  });
+});

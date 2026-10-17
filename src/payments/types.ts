@@ -127,6 +127,7 @@ export interface CancelInput {
 
 /**
  * canceled        취소 확인됨(응답 status CANCELED/PARTIAL_CANCELED, 또는 이미 취소돼 조회로 CANCELED 확인 — alreadyCanceled=true)
+ *                 `alreadyCanceled:true` 는 "이 요청 전에 이미 반영돼 있었다"는 뜻이다. 부분 취소 요청이면 현재 누계 === 요청 전 누계 + cancelAmount 일 때만 돌려준다(결제가 다른 이유로 전액 취소된 경우는 `not_cancelable`).
  * processing      취소 진행 중(ALREADY_REFUNDING_PAYMENT·409 IDEMPOTENT_REQUEST_PROCESSING) → 조금 뒤 조회
  * retry_later     FORBIDDEN_CONSECUTIVE_REQUEST·429 → 잠시 뒤 같은 키로 재시도
  * uncertain       결과 불명(PROVIDER_ERROR·5xx·타임아웃·ALREADY_* 인데 조회로 확인 못 함) → 조회 후 확정, 같은 키 유지.
