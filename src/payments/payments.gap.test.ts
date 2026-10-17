@@ -204,3 +204,16 @@ describe("approved_mismatch 취소 도우미·웹훅 대조", () => {
     expect(isWebhookSecretValid("abc", undefined)).toBe(false);
   });
 });
+
+describe("승인 응답 통화 검사", () => {
+  it("KRW 가 아닌 승인 응답은 approved_mismatch(CURRENCY_MISMATCH), KRW·통화 없음은 success", async () => {
+    const usd = mk(resp(pay({ currency: "USD" })));
+    const krw = mk(resp(pay({ currency: "KRW" })));
+    const none = mk(resp(pay()));
+    const run = (m: ReturnType<typeof mk>) => confirmPayment(cfgOf(m), { paymentKey: PK, orderId: OID, amount: 10000 });
+
+    expect(await run(usd)).toMatchObject({ kind: "approved_mismatch", reason: "CURRENCY_MISMATCH" });
+    expect((await run(krw)).kind).toBe("success");
+    expect((await run(none)).kind).toBe("success");
+  });
+});

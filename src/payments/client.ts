@@ -164,6 +164,8 @@ export async function confirmPayment(cfg: TossConfig, input: ConfirmInput): Prom
   if (p.status !== "DONE") return { kind: "uncertain", code: `STATUS_${p.status}`, message: "승인 응답의 상태가 DONE 이 아닙니다." };
   if (p.orderId !== input.orderId || p.paymentKey !== input.paymentKey) return { kind: "approved_mismatch", reason: "ORDER_MISMATCH", payment: p };
   if (p.totalAmount !== input.amount) return { kind: "approved_mismatch", reason: "AMOUNT_MISMATCH", payment: p };
+  // 통화가 KRW 가 아니면 금액이 같아 보여도 같은 값이 아니다(응답에 통화가 없으면 KRW 로 본다). 토스에선 승인된 상태 → 취소 연계 대상
+  if (p.currency && p.currency !== "KRW") return { kind: "approved_mismatch", reason: "CURRENCY_MISMATCH", payment: p };
 
   return { kind: "success", payment: p };
 }

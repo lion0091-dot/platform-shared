@@ -69,7 +69,8 @@ export interface ConfirmInput {
   idempotencyKey?: string;
 }
 
-export type ConfirmMismatchReason = "ORDER_MISMATCH" | "AMOUNT_MISMATCH";
+/** CURRENCY_MISMATCH: 2026-10-17 추가(공개 union 확대 — exhaustive switch 를 쓰는 소비자는 분기 추가 필요) */
+export type ConfirmMismatchReason = "ORDER_MISMATCH" | "AMOUNT_MISMATCH" | "CURRENCY_MISMATCH";
 
 /**
  * success         승인 완료(status DONE · orderId·paymentKey 일치 · totalAmount === 기대 금액)

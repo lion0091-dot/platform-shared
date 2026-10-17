@@ -39,7 +39,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 | 토스 응답 | `kind` | 3분류 | 앱이 할 일 |
 |---|---|---|---|
 | 200, status=DONE, orderId·paymentKey 일치, totalAmount=기대 금액 | `success` | 승인 | 결제 완료 반영 |
-| 200, **status=DONE** 인데 orderId/paymentKey 불일치 또는 totalAmount≠기대 금액 (검사 순서: status → 주문·키 → 금액) | `approved_mismatch`(`reason`) | **토스에선 승인된 상태** | PG 취소 연계가 필요: 앱이 `cancelPayment` 호출 여부 결정, 주문은 완료로 반영하지 말고 사람이 확인 |
+| 200, **status=DONE** 인데 orderId/paymentKey 불일치 또는 totalAmount≠기대 금액 (검사 순서: status → 주문·키 → 금액 → 통화. 통화가 KRW 가 아니면 `reason:"CURRENCY_MISMATCH"`) | `approved_mismatch`(`reason`) | **토스에선 승인된 상태** | PG 취소 연계가 필요: 앱이 `cancelPayment` 호출 여부 결정, 주문은 완료로 반영하지 말고 사람이 확인 |
 | 200 인데 status≠DONE(IN_PROGRESS 등, 주문·금액이 달라도 불일치로 단정하지 않음) 또는 형식 이상 | `uncertain`(`STATUS_x`/`BAD_RESPONSE`) | 불확실 | PENDING 유지, 조회 |
 | 400 `ALREADY_PROCESSED_PAYMENT` | `already_done` | 조회로 확정 | `getPaymentByOrderId` → `interpretPayment`=paid 면 완료 반영(주문·금액 일치 때만) |
 | 409 `IDEMPOTENT_REQUEST_PROCESSING`, 400 `ALREADY_PROCESSING_REQUEST` | `processing` | 불확실 | PENDING 유지, 잠시 뒤 조회(또는 같은 키로 재호출). **FAILED 금지** |
