@@ -363,3 +363,21 @@ describe("부분 취소 요청의 ALREADY_CANCELED 의미 분리", () => {
     expect(await cancelPayment(cfgOf(mk(ac(), new Error("down"))), input(0, 3000))).toMatchObject({ kind: "uncertain" });
   });
 });
+
+describe("balanceAmount 없는 PARTIAL_CANCELED 의 완전 취소 판정", () => {
+  const exp = { orderId: OID, amount: 10000 };
+  const base = { paymentKey: PK, orderId: OID, totalAmount: 10000, method: "", approvedAt: null, status: "PARTIAL_CANCELED", balanceAmount: null };
+  const c = (...a: number[]) => a.map((cancelAmount) => ({ cancelAmount, cancelReason: "", canceledAt: null, transactionKey: null, cancelStatus: null }));
+
+  it("cancels 합이 총액과 같을 때만 canceled", () => {
+    expect(interpretPayment({ ...base, cancels: c(4000, 6000) }, exp)).toBe("canceled");
+    expect(interpretPayment({ ...base, cancels: c(4000) }, exp)).toBe("partial_canceled");
+    expect(interpretPayment({ ...base, cancels: [] }, exp)).toBe("partial_canceled");
+  });
+
+  it("전액 요청 응답이 PARTIAL_CANCELED + balance 없음 + cancels 합 = 총액이면 canceled", async () => {
+    const m = mk(resp(pay({ status: "PARTIAL_CANCELED", cancels: [{ cancelAmount: 10000 }] })));
+
+    expect(await cancelPayment(cfgOf(m), { paymentKey: PK, cancelReason: "x", idempotencyKey: cancelIdempotencyKey({ paymentKey: PK }) })).toMatchObject({ kind: "canceled", alreadyCanceled: false });
+  });
+});

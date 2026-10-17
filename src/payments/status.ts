@@ -13,9 +13,17 @@ export function canceledTotal(p: Pick<TossPayment, "status" | "totalAmount" | "b
 
 /**
  * 완전히 취소된 결제인가. 토스는 부분 취소로 잔액을 0 까지 만들어도 status 를 CANCELED 가 아닌 PARTIAL_CANCELED 로 남긴다(2026-10-16 실측).
- * 그래서 CANCELED 이거나, PARTIAL_CANCELED 이면서 balanceAmount 가 정확히 0 일 때만 true. balanceAmount 가 없으면(null) 판단하지 않는다.
+ * 그래서 CANCELED 이거나, PARTIAL_CANCELED 이면서 balanceAmount 가 정확히 0 일 때 true.
+ * balanceAmount 가 없으면(null) cancels 의 cancelAmount 합이 totalAmount 와 같을 때(합이 0 보다 큼)만 true — 둘 다 없으면 판단하지 않는다.
  * 내부용(index 에서 내보내지 않는다).
  */
-export function isFullyCanceled(p: Pick<TossPayment, "status" | "balanceAmount">): boolean {
-  return p.status === "CANCELED" || (p.status === "PARTIAL_CANCELED" && p.balanceAmount === 0);
+export function isFullyCanceled(p: Pick<TossPayment, "status" | "balanceAmount"> & Partial<Pick<TossPayment, "cancels" | "totalAmount">>): boolean {
+  if (p.status === "CANCELED") return true;
+  if (p.status !== "PARTIAL_CANCELED") return false;
+  if (p.balanceAmount === 0) return true;
+  if (p.balanceAmount !== null || !p.cancels || p.cancels.length === 0 || typeof p.totalAmount !== "number") return false;
+
+  const sum = p.cancels.reduce((s, c) => s + c.cancelAmount, 0);
+
+  return sum > 0 && sum === p.totalAmount;
 }
