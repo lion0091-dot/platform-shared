@@ -32,7 +32,8 @@ async function call(cfg: TossConfig, method: "GET" | "POST", path: string, opts:
   const timeoutMs = typeof cfg.timeoutMs === "number" && Number.isFinite(cfg.timeoutMs) && cfg.timeoutMs > 0 ? cfg.timeoutMs : TOSS_TIMEOUT_MS;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  const headers: Record<string, string> = { Authorization: basicAuthHeader(cfg.secretKey) };
+  // 환경변수에 섞여 들어온 앞뒤 공백·개행은 지우고 보낸다(키 검사와 같은 기준)
+  const headers: Record<string, string> = { Authorization: basicAuthHeader(cfg.secretKey.trim()) };
 
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;

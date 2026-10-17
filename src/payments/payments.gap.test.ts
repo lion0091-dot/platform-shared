@@ -42,6 +42,8 @@ describe("키 종류(test/live) 검사", () => {
     expect(tossKeyMode("test_gsk_x")).toBe("test");
     expect(tossKeyMode("live_gsk_x")).toBe("live");
     expect(tossKeyMode("sk_x")).toBeNull();
+    expect(tossKeyMode("  test_sk_x\n")).toBe("test"); // 앞뒤 공백·개행은 지우고 판정
+    expect(tossKeyMode("TEST_SK_x")).toBeNull(); // 대소문자 구분
     expect(tossKeyMode("")).toBeNull();
   });
 
@@ -217,5 +219,21 @@ describe("승인 응답 통화 검사", () => {
     expect(await run(usd)).toMatchObject({ kind: "approved_mismatch", reason: "CURRENCY_MISMATCH" });
     expect((await run(krw)).kind).toBe("success");
     expect((await run(none)).kind).toBe("success");
+  });
+});
+
+describe("키 공백 처리·모의 서버", () => {
+  it("개행이 섞인 키는 지운 값으로 검사하고 인증 헤더도 지운 값으로 만든다", async () => {
+    const m = mk(resp(pay()));
+
+    await getPayment({ secretKey: "test_sk_abc\n", fetch: m.fetch, expectedMode: "test" }, PK);
+    expect((m.f.mock.calls[0] as unknown as [string, RequestInit])[1].headers).toMatchObject({ Authorization: `Basic ${Buffer.from("test_sk_abc:").toString("base64")}` });
+  });
+
+  it("baseUrl 모의 서버 + unchecked 는 접두사 없는 키로 오탐 없이 동작", async () => {
+    const m = mk(resp(pay()));
+
+    expect(await getPayment({ secretKey: "mock", fetch: m.fetch, baseUrl: "http://localhost:9999", expectedMode: "unchecked" }, PK)).toMatchObject({ kind: "found" });
+    expect((m.f.mock.calls[0] as unknown as [string])[0]).toBe(`http://localhost:9999/v1/payments/${PK}`);
   });
 });
