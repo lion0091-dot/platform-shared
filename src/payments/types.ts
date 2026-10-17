@@ -112,6 +112,7 @@ export type LookupOutcome =
 
 export interface CancelInput {
   paymentKey: string;
+  /** 취소 사유(200자). **요청마다 다른 값(취소 요청 ID 등)을 포함할 것을 권장**: NOT_CANCELABLE_AMOUNT·ALREADY_CANCELED 뒤 "이미 반영" 판정이 취소 이력의 (금액, 사유)로 이 요청의 몫을 가려내기 때문이다. */
   cancelReason: string;
   /** 생략하면 전액 취소 */
   cancelAmount?: number;

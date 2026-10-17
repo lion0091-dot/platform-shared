@@ -86,7 +86,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 | 400 `ALREADY_REFUNDING_PAYMENT`, 409 `IDEMPOTENT_REQUEST_PROCESSING` | `processing` | 잠시 뒤 조회 |
 | 403 `FORBIDDEN_CONSECUTIVE_REQUEST`, 429 | `retry_later` | 잠시 뒤 **같은 키로** 재시도 |
 | 400 `PROVIDER_ERROR`, 5xx, 타임아웃, 네트워크, 응답 상태 이상, 모르는 코드(`CARD_PROCESSING_ERROR` 포함) | `uncertain` | 같은 키 유지, 조회(`getPayment`)로 확정 후 필요하면 같은 키로 재시도 |
-| 403 `NOT_CANCELABLE_AMOUNT` | **모듈이 먼저 `getPayment` 로 이미 반영된 취소인지 확인**(첫 취소 응답 유실 뒤 다른 키로 재취소하면 이 코드가 옴): 전액이면 완전 취소 상태, 부분이면 현재 누계 = 요청 전 누계+금액 → `canceled`(`alreadyCanceled:true`). 아니면 아래 `not_cancelable` | 아래와 같음 |
+| 403 `NOT_CANCELABLE_AMOUNT` | **모듈이 먼저 `getPayment` 로 이미 반영된 취소인지 확인**(첫 취소 응답 유실 뒤 다른 키로 재취소하면 이 코드가 옴): 전액이면 완전 취소 상태(→ `canceled`, `alreadyCanceled:true` 는 "결제가 취소된 상태"를 뜻하며 누가 취소했는지는 가리지 않음), 부분이면 현재 누계 = 요청 전 누계+금액 **이고 취소 이력에 같은 금액·같은 사유(전송한 `cancelReason`)의 항목이 있을 때만** `canceled`. **한계**: 다른 경로가 같은 금액·같은 사유로 취소했다면 구분하지 못한다 → `cancelReason` 에 요청마다 다른 값(취소 요청 ID 등)을 넣을 것. 누계는 맞는데 이력이 없으면 `not_cancelable`(사람이 `cancels` 확인). 아니면 아래 `not_cancelable` | 아래와 같음 |
 | 403 `NOT_CANCELABLE_PAYMENT`·`NOT_CANCELABLE_AMOUNT`·`NOT_CANCELABLE_PAYMENT_FOR_DORMANT_USER`·`EXCEED_MAX_REFUND_DUE`, `EXCEED_CANCEL_LIMIT`·`REFUND_REJECTED`·`NOT_ALLOWED_PARTIAL_REFUND(_WAITING_DEPOSIT)`·`EXCEED_CANCEL_AMOUNT_DISCOUNT_AMOUNT`·`FORBIDDEN_BANK_REFUND_REQUEST`·`FAILED_CLOSED_ACCOUNT_REFUND`·환불계좌 오류(`INVALID_REFUND_ACCOUNT_INFO`·`_NUMBER`·`INVALID_BANK`) | `not_cancelable` | 재시도 금지, 사람이 처리(API 밖 환불 등) |
 | 403 `NOT_AVAILABLE_BANK`(은행 서비스 시간 아님) | `retry_later` | 시간이 지난 뒤 **같은 키로** 재시도 |
 | 401 `UNAUTHORIZED_KEY`, 403 `FORBIDDEN_REQUEST` | `fatal` | 알림 |

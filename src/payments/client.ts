@@ -280,7 +280,11 @@ export async function cancelPayment(cfg: TossConfig, input: CancelInput): Promis
         // 부분 요청에 대한 ALREADY_CANCELED: "이미 취소된 결제"는 이번 부분 취소가 아니라 결제 전체의 상태다. 이번 요청의 효과인지 누계로 구분한다.
         const cur = canceledTotal(l.payment);
 
-        if (cur !== null && cur === input.alreadyCanceledTotal! + input.cancelAmount!) return { kind: "canceled", payment: l.payment, alreadyCanceled: true };
+        if (cur !== null && cur === input.alreadyCanceledTotal! + input.cancelAmount!) {
+          if (ownsPartialCancel(l.payment, input)) return { kind: "canceled", payment: l.payment, alreadyCanceled: true };
+
+          return { kind: "not_cancelable", code: r.code, message: NOT_OWNED_MSG };
+        }
 
         if (isFullyCanceled(l.payment)) {
           return { kind: "not_cancelable", code: r.code, message: "결제가 이미 전액 취소되어 이번 부분 취소가 적용됐는지 알 수 없습니다. 취소 이력(cancels)을 확인해 사람이 처리하세요." };
@@ -392,5 +396,18 @@ async function findAppliedCancel(cfg: TossConfig, input: CancelInput): Promise<T
 
   const chk = await checkPartialCancel(cfg, input);
 
-  return chk.kind === "applied" ? chk.payment : null;
+  // 누계가 맞아도 취소 이력에 이 요청의 몫(같은 금액·같은 사유)이 없으면 다른 경로가 방금 같은 금액을 취소한 것일 수 있어 "이미 반영"으로 보지 않는다.
+  return chk.kind === "applied" && ownsPartialCancel(chk.payment, input) ? chk.payment : null;
+}
+
+const NOT_OWNED_MSG = "취소 누계는 맞지만 취소 이력에서 이 요청의 몫(같은 금액·같은 사유)을 찾지 못했습니다. 다른 경로가 같은 금액을 취소했을 수 있으니 cancels 를 확인해 사람이 처리하세요.";
+
+/**
+ * 부분 취소가 이 요청의 몫인지(best-effort): 취소 이력에 같은 금액·같은 사유(전송한 그대로, 200자 절단 후)의 항목이 있어야 한다.
+ * 한계: 다른 경로가 **같은 금액·같은 사유**로 취소했다면 구분하지 못한다 → 취소 사유에 요청마다 다른 값(취소 요청 ID 등)을 넣는 것을 권장한다.
+ */
+function ownsPartialCancel(p: TossPayment, input: CancelInput): boolean {
+  const reason = [...input.cancelReason].slice(0, 200).join("");
+
+  return p.cancels.some((c) => c.cancelAmount === input.cancelAmount && c.cancelReason === reason);
 }
