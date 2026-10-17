@@ -69,12 +69,18 @@ export interface ConfirmInput {
   orderId: string;
   /** 클라이언트가 준 값이 아니라 서버가 DB 에서 계산한 기대 금액(원, 정수) */
   amount: number;
+  /**
+   * 면세·복합과세 상점용(선택): 서버가 DB 에서 계산한 기대 면세 금액(원, 0 이상 정수, amount 이하). 지정하면 승인 응답의 taxFreeAmount 와 대조해
+   * 다르면 approved_mismatch(TAX_FREE_MISMATCH), 응답에 값이 없으면 uncertain(TAX_FREE_UNVERIFIED). 면세 금액은 클라이언트 결제창이 정하므로 서버 대조가 필요하다.
+   * 생략하면 대조하지 않는다(일반 과세 상점).
+   */
+  expectedTaxFreeAmount?: number;
   /** 생략하면 confirmIdempotencyKey(orderId, paymentKey). 재시도 때는 반드시 같은 값을 넘긴다. */
   idempotencyKey?: string;
 }
 
-/** CURRENCY_MISMATCH: 2026-10-17 추가(공개 union 확대 — exhaustive switch 를 쓰는 소비자는 분기 추가 필요) */
-export type ConfirmMismatchReason = "ORDER_MISMATCH" | "AMOUNT_MISMATCH" | "CURRENCY_MISMATCH";
+/** CURRENCY_MISMATCH·TAX_FREE_MISMATCH: 2026-10-17 추가(공개 union 확대 — exhaustive switch 를 쓰는 소비자는 분기 추가 필요) */
+export type ConfirmMismatchReason = "ORDER_MISMATCH" | "AMOUNT_MISMATCH" | "CURRENCY_MISMATCH" | "TAX_FREE_MISMATCH";
 
 /**
  * success         승인 완료(status DONE · orderId·paymentKey 일치 · totalAmount === 기대 금액)

@@ -123,10 +123,12 @@ export function classifyFailCode(code: string | null | undefined): FailUrlKind {
 }
 
 /** 조회 결과(Payment)를 앱이 기대한 주문·금액과 대조해 해석한다. expected 는 앱이 DB 에서 가져온 값이어야 한다. */
-export function interpretPayment(payment: TossPayment, expected: { orderId: string; amount: number }): PaymentInterpretation {
+export function interpretPayment(payment: TossPayment, expected: { orderId: string; amount: number; taxFreeAmount?: number }): PaymentInterpretation {
   if (payment.orderId !== expected.orderId || payment.totalAmount !== expected.amount) return "mismatch";
   // 통화가 KRW 가 아니면 금액이 같아 보여도 같은 값이 아니다(응답에 통화가 없으면 KRW 로 본다)
   if (payment.currency && payment.currency !== "KRW") return "mismatch";
+  // 면세 금액을 넘긴 앱(면세·복합과세 상점)은 토스에 기록된 값과 달라도 자동 확정하지 않는다(응답에 값이 없으면 대조 불가라 통과)
+  if (expected.taxFreeAmount !== undefined && typeof payment.taxFreeAmount === "number" && payment.taxFreeAmount !== expected.taxFreeAmount) return "mismatch";
 
   if (isFullyCanceled(payment)) return "canceled";
 

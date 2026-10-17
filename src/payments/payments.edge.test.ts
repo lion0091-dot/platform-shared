@@ -118,3 +118,31 @@ describe("취소 항목의 cancelStatus(DONE 만 합계에 포함)", () => {
     expect(interpretPayment({ ...pending, cancels: [c(5000, "DONE"), c(5000, "DONE")] }, { orderId: OID, amount: 10000 })).toBe("canceled");
   });
 });
+
+describe("면세 금액 대조(expectedTaxFreeAmount)", () => {
+  const run = (m: ReturnType<typeof mk>, tax?: number) => confirmPayment(cfgOf(m), { paymentKey: PK, orderId: OID, amount: 10000, ...(tax === undefined ? {} : { expectedTaxFreeAmount: tax }) });
+
+  it("일치하면 success, 다르면 approved_mismatch(TAX_FREE_MISMATCH), 응답에 값이 없으면 uncertain(TAX_FREE_UNVERIFIED), 지정 안 하면 대조 안 함", async () => {
+    expect(await run(mk(resp(pay({ taxFreeAmount: 10000 }))), 10000)).toMatchObject({ kind: "success" });
+    expect(await run(mk(resp(pay({ taxFreeAmount: 0 }))), 10000)).toMatchObject({ kind: "approved_mismatch", reason: "TAX_FREE_MISMATCH" });
+    expect(await run(mk(resp(pay())), 10000)).toMatchObject({ kind: "uncertain", code: "TAX_FREE_UNVERIFIED" });
+    expect(await run(mk(resp(pay({ taxFreeAmount: 5 })))).then((r) => r.kind)).toBe("success");
+  });
+
+  it("범위를 벗어난 기대 면세 금액은 호출 전에 던진다", async () => {
+    const m = mk(resp(pay()));
+
+    for (const bad of [-1, 1.5, 10001, Number.NaN]) await expect(run(m, bad)).rejects.toThrow(/INVALID_TAX_FREE/);
+
+    expect(m.f).not.toHaveBeenCalled();
+  });
+
+  it("interpretPayment: expected.taxFreeAmount 를 넘기면 토스 기록과 다를 때 mismatch", () => {
+    const p = { paymentKey: PK, orderId: OID, status: "DONE", totalAmount: 10000, method: "", approvedAt: null, balanceAmount: null, cancels: [], taxFreeAmount: 10000 };
+
+    expect(interpretPayment(p, { orderId: OID, amount: 10000, taxFreeAmount: 10000 })).toBe("paid");
+    expect(interpretPayment(p, { orderId: OID, amount: 10000, taxFreeAmount: 0 })).toBe("mismatch");
+    expect(interpretPayment(p, { orderId: OID, amount: 10000 })).toBe("paid");
+    expect(interpretPayment({ ...p, taxFreeAmount: undefined }, { orderId: OID, amount: 10000, taxFreeAmount: 0 })).toBe("paid");
+  });
+});

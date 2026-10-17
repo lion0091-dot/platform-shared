@@ -10,7 +10,7 @@
 - `TossConfig.expectedMode` **필수**(`"test" | "live" | "unchecked"`). 생략하면 `KEY_MODE_REQUIRED` 를 던진다. 접두사(`test_sk_`·`live_sk_`, 위젯 `gsk`)와 다르면 `KEY_MODE_MISMATCH`. `"unchecked"` 는 토스 도메인이 아닌 `baseUrl`(모의 서버)에서만 허용(아니면 `KEY_MODE_UNCHECKED_FORBIDDEN`).
 - `ConfirmOutcome` 에 `{ kind: "waiting_for_deposit"; payment }` 추가 — `switch` 를 exhaustive 하게 쓰는 소비자는 분기 추가 필요.
 - `PaymentInterpretation` 에 `"waiting_for_deposit"` 추가(이전엔 `in_progress`).
-- `ConfirmMismatchReason` 에 `"CURRENCY_MISMATCH"` 추가(승인 응답 통화가 KRW 가 아님).
+- `ConfirmMismatchReason` 에 `"CURRENCY_MISMATCH"`(승인 응답 통화가 KRW 가 아님)·`"TAX_FREE_MISMATCH"`(`expectedTaxFreeAmount` 지정 시 면세 금액 불일치) 추가.
 - `getPayment` 가 `async` 함수가 됨: 입력 오류가 동기 throw 가 아니라 rejected Promise 로 나온다(`await`/`.catch` 를 쓰면 동일).
 - `TossPayment.secret` 은 열거되지 않는 속성: `JSON.stringify`·스프레드·`Object.keys` 에 나오지 않고 **`structuredClone`·큐·캐시 직렬화를 거치면 사라진다**(`payment.secret` 직접 읽기는 원본에서 동일). 직렬화 전에 읽을 때는 `getPaymentSecret(payment)`(신규).
 
@@ -32,6 +32,7 @@
 - `checkPartialCancel`, `PartialCancelCheck`, `canceledTotal`, `CancelOutcome.uncertain.currentCanceledTotal`(선택).
 - `getPaymentSecret`.
 - `cancelApprovedMismatch`(+ `createTossClient().cancelApprovedMismatch`), `tossKeyMode`, `assertKeyMode`, `TOSS_TIMEOUT_MAX_MS`.
+- `ConfirmInput.expectedTaxFreeAmount`(선택)·`interpretPayment` 의 `expected.taxFreeAmount`(선택): 면세·복합과세 상점의 면세 금액 서버 대조.
 - `CancelInput.taxFreeAmount`, `CancelInput.refundReceiveAccount`(가상계좌 환불).
 - `TossPayment` 선택 필드: `currency`·`taxFreeAmount`·`suppliedAmount`·`vat`·`secret`·`virtualAccount`.
 
