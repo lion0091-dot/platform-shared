@@ -39,4 +39,4 @@
 - `TossPayment` 선택 필드: `currency`·`taxFreeAmount`·`suppliedAmount`·`vat`·`secret`·`virtualAccount`.
 
 ### 참고
-- 위 변경은 모두 로컬 커밋이며 공개 저장소에 push 되지 않았다. 공개 시점은 앱 전환 직전(스테이징 반영 → 테스트 키 실호출 시험 → push·rc.2 태그).
+- 위 변경은 `feat/toss-confirm-classify` 브랜치에만 올라가 있고 main 병합·태그(rc.2 등)는 아직 없다. 태그·병합 시점은 앱 전환 직전(스테이징 반영 → 테스트 키 실호출 시험 → 태그).
