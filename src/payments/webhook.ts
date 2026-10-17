@@ -46,13 +46,16 @@ export async function verifyPaymentWebhook(cfg: TossConfig, body: unknown): Prom
 
   if (!paymentKey && !orderId) return { kind: "rejected", reason: "BAD_PAYLOAD" };
 
-  // 형식이 이상한 값(주문번호 규칙 위반 등)은 조회 함수가 던지므로 거부로 바꾼다
+  // 웹훅 본문의 값이 형식 규칙을 어긴 경우(INVALID_ORDER_ID·INVALID_PAYMENT_KEY)만 거부로 바꾼다.
+  // 그 밖의 던짐(KEY_MODE_REQUIRED·KEY_MODE_MISMATCH 같은 설정 오류 등)은 삼키지 않고 그대로 던져, 운영 설정 오류가 "모든 웹훅 거부"로 숨지 않게 한다.
   let l: LookupOutcome;
 
   try {
     l = paymentKey ? await getPayment(cfg, paymentKey) : await getPaymentByOrderId(cfg, orderId!);
-  } catch {
-    return { kind: "rejected", reason: "BAD_PAYLOAD" };
+  } catch (e) {
+    if (e instanceof Error && /^(INVALID_ORDER_ID|INVALID_PAYMENT_KEY)\b/.test(e.message)) return { kind: "rejected", reason: "BAD_PAYLOAD" };
+
+    throw e;
   }
 
   if (l.kind === "not_found") return { kind: "rejected", reason: "NOT_FOUND" };

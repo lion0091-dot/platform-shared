@@ -49,4 +49,14 @@ describe("웹훅 검증(verifyPaymentWebhook): 본문 상태는 믿지 않고 �
     expect(await verifyPaymentWebhook(cfgOf(mk()), { foo: 1 })).toMatchObject({ kind: "rejected", reason: "BAD_PAYLOAD" });
     expect(await verifyPaymentWebhook(cfgOf(mk(new Error("down"))), evt({ paymentKey: PK }))).toMatchObject({ kind: "lookup_failed" });
   });
+
+  it("설정 오류(KEY_MODE_REQUIRED·KEY_MODE_MISMATCH)는 BAD_PAYLOAD 로 삼키지 않고 던진다", async () => {
+    const body = evt({ paymentKey: PK });
+    const m = mk(resp(pay()));
+
+    await expect(verifyPaymentWebhook({ secretKey: "test_sk_fake_secret", fetch: m.fetch } as never, body)).rejects.toThrow(/KEY_MODE_REQUIRED/);
+    await expect(verifyPaymentWebhook({ secretKey: "test_sk_fake_secret", fetch: m.fetch, expectedMode: "live" }, body)).rejects.toThrow(/KEY_MODE_MISMATCH/);
+    await expect(verifyPaymentWebhook({ secretKey: "test_sk_fake_secret", fetch: m.fetch, expectedMode: "live" }, dep("s1"))).rejects.toThrow(/KEY_MODE_MISMATCH/);
+    expect(m.f).not.toHaveBeenCalled();
+  });
 });
