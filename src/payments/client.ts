@@ -107,12 +107,11 @@ function toPayment(b: Record<string, unknown>): TossPayment | null {
         }
       : null;
 
-  return {
+  const payment: TossPayment = {
     currency: typeof b.currency === "string" ? b.currency : null,
     taxFreeAmount: num(b.taxFreeAmount),
     suppliedAmount: num(b.suppliedAmount),
     vat: num(b.vat),
-    secret: typeof b.secret === "string" ? b.secret : null,
     virtualAccount,
     paymentKey: b.paymentKey,
     orderId: b.orderId,
@@ -123,6 +122,11 @@ function toPayment(b: Record<string, unknown>): TossPayment | null {
     balanceAmount: typeof b.balanceAmount === "number" ? b.balanceAmount : null,
     cancels,
   };
+
+  // secret 은 열거되지 않게 둔다: 결과 객체를 로그·JSON 으로 찍거나 {...payment} 로 복사해도 새지 않는다. payment.secret 으로는 읽힌다(웹훅 대조용).
+  Object.defineProperty(payment, "secret", { value: typeof b.secret === "string" ? b.secret : null, enumerable: false, writable: false, configurable: false });
+
+  return payment;
 }
 
 /** 결제 승인 POST /v1/payments/confirm. 한 번만 호출한다(내부 재시도 없음). 불확실하면 uncertain/processing 을 돌려주니 앱이 조회·재호출한다. */

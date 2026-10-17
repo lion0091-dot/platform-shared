@@ -115,7 +115,8 @@ describe("가상계좌·통화·면세 필드", () => {
     const m = mk(resp(pay({ status: "WAITING_FOR_DEPOSIT", virtualAccount: va, secret: "sec_1" })));
     const r = await confirmPayment(cfgOf(m), { paymentKey: PK, orderId: OID, amount: 10000 });
 
-    expect(r).toMatchObject({ kind: "waiting_for_deposit", payment: { virtualAccount: { accountNumber: "1234567890", bankCode: "20" }, secret: "sec_1" } });
+    expect(r).toMatchObject({ kind: "waiting_for_deposit", payment: { virtualAccount: { accountNumber: "1234567890", bankCode: "20" } } });
+    if (r.kind === "waiting_for_deposit") expect(r.payment.secret).toBe("sec_1");
   });
 
   it("WAITING_FOR_DEPOSIT 인데 금액이 다르면 입금 대기로 보지 않고 uncertain", async () => {
@@ -257,5 +258,21 @@ describe("timeoutMs 상한", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("secret 비노출", () => {
+  it("payment.secret 은 읽히지만 JSON·스프레드·열거에는 나오지 않는다", async () => {
+    const m = mk(resp(pay({ secret: "whsec_hidden" })));
+    const r = await getPayment(cfgOf(m), PK);
+
+    expect(r.kind).toBe("found");
+
+    if (r.kind !== "found") return;
+
+    expect(r.payment.secret).toBe("whsec_hidden");
+    expect(JSON.stringify(r)).not.toContain("whsec_hidden");
+    expect(JSON.stringify({ ...r.payment })).not.toContain("whsec_hidden");
+    expect(Object.keys(r.payment)).not.toContain("secret");
   });
 });
