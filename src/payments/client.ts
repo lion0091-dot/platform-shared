@@ -20,6 +20,21 @@ export function basicAuthHeader(secretKey: string): string {
   return `Basic ${btoa(`${secretKey}:`)}`;
 }
 
+/** "unchecked" 는 토스 도메인이 아닌 baseUrl(모의 서버)에서만 허용한다 — 실제 토스(live 키 포함)에 검사 없이 나가는 것을 막는다. */
+function assertUncheckedAllowed(baseUrl: string | undefined): void {
+  let host = "";
+
+  try {
+    host = baseUrl ? new URL(baseUrl).hostname.toLowerCase() : "";
+  } catch {
+    host = "";
+  }
+
+  if (!host || host === "tosspayments.com" || host.endsWith(".tosspayments.com")) {
+    throw new Error("KEY_MODE_UNCHECKED_FORBIDDEN: expectedMode \"unchecked\" 는 토스 도메인이 아닌 baseUrl(모의 서버)에서만 쓸 수 있다. 실제 토스에는 \"test\"|\"live\" 를 지정한다.");
+  }
+}
+
 /** paymentKey: 비어 있지 않은 보이는 ASCII 200자 이하(빈 값이면 URL 이 다른 엔드포인트가 된다) */
 function assertPaymentKey(paymentKey: string): string {
   if (typeof paymentKey !== "string" || !/^[!-~]{1,200}$/.test(paymentKey)) throw new Error("INVALID_PAYMENT_KEY: paymentKey 는 1~200자의 보이는 ASCII 여야 한다.");
@@ -29,7 +44,8 @@ function assertPaymentKey(paymentKey: string): string {
 
 async function call(cfg: TossConfig, method: "GET" | "POST", path: string, opts: { body?: unknown; idempotencyKey?: string } = {}): Promise<Raw> {
   if (!cfg.expectedMode) throw new Error("KEY_MODE_REQUIRED: expectedMode(\"test\"|\"live\") 를 지정해야 한다. 접두사 없는 모의 키는 \"unchecked\".");
-  if (cfg.expectedMode !== "unchecked") assertKeyMode(cfg.secretKey, cfg.expectedMode);
+  if (cfg.expectedMode === "unchecked") assertUncheckedAllowed(cfg.baseUrl);
+  else assertKeyMode(cfg.secretKey, cfg.expectedMode);
 
   const timeoutMs = typeof cfg.timeoutMs === "number" && Number.isFinite(cfg.timeoutMs) && cfg.timeoutMs > 0 ? Math.min(cfg.timeoutMs, TOSS_TIMEOUT_MAX_MS) : TOSS_TIMEOUT_MS;
   const ctrl = new AbortController();

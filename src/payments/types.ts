@@ -12,7 +12,7 @@ export interface TossConfig {
   /**
    * **필수.** 이 환경이 쓸 키 종류. 시크릿키 접두사(test_/live_)와 다르면 네트워크 호출 전에 KEY_MODE_MISMATCH 를 던진다.
    * 운영=`"live"`, 스테이징·리허설=`"test"`. 생략(JS 호출 포함)하면 KEY_MODE_REQUIRED 를 던진다.
-   * `"unchecked"` 는 접두사가 없는 가짜 키로 모의 서버(baseUrl)·단위 시험을 돌릴 때만 쓴다(운영 코드에서 쓰지 않는다).
+   * `"unchecked"` 는 접두사가 없는 가짜 키로 **모의 서버(토스 도메인이 아닌 baseUrl)** 를 쓸 때만 허용된다 — baseUrl 이 없거나 *.tosspayments.com 이면 KEY_MODE_UNCHECKED_FORBIDDEN 을 던진다(live 키가 검사 없이 실제 토스로 나가는 것 방지).
    */
   expectedMode: TossKeyMode | "unchecked";
 }

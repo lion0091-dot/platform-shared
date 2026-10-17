@@ -7,7 +7,7 @@
 기준: v0.3.0-rc.1(`0db3db3`) 대비. 두 앱(shipping-prj·wholesale)은 아직 `#v0.2.2`(payments 없음)에 고정이라 **지금 깨지는 곳은 없고, 핀을 올릴 때부터 적용**된다.
 
 ### BREAKING (타입·분기 영향)
-- `TossConfig.expectedMode` **필수**(`"test" | "live" | "unchecked"`). 생략하면 `KEY_MODE_REQUIRED` 를 던진다. 접두사(`test_sk_`·`live_sk_`, 위젯 `gsk`)와 다르면 `KEY_MODE_MISMATCH`.
+- `TossConfig.expectedMode` **필수**(`"test" | "live" | "unchecked"`). 생략하면 `KEY_MODE_REQUIRED` 를 던진다. 접두사(`test_sk_`·`live_sk_`, 위젯 `gsk`)와 다르면 `KEY_MODE_MISMATCH`. `"unchecked"` 는 토스 도메인이 아닌 `baseUrl`(모의 서버)에서만 허용(아니면 `KEY_MODE_UNCHECKED_FORBIDDEN`).
 - `ConfirmOutcome` 에 `{ kind: "waiting_for_deposit"; payment }` 추가 — `switch` 를 exhaustive 하게 쓰는 소비자는 분기 추가 필요.
 - `PaymentInterpretation` 에 `"waiting_for_deposit"` 추가(이전엔 `in_progress`).
 - `ConfirmMismatchReason` 에 `"CURRENCY_MISMATCH"` 추가(승인 응답 통화가 KRW 가 아님).

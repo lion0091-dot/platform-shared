@@ -65,7 +65,7 @@ describe("키 종류(test/live) 검사", () => {
 
     expect(await getPayment(cfgOf(ok, { expectedMode: "test" }), PK)).toMatchObject({ kind: "found" });
     await expect(getPayment({ secretKey: SECRET, fetch: ok.fetch } as never, PK)).rejects.toThrow(/KEY_MODE_REQUIRED/);
-    expect(await getPayment({ secretKey: "fake", fetch: ok.fetch, expectedMode: "unchecked" }, PK)).toMatchObject({ kind: "found" });
+    expect(await getPayment({ secretKey: "fake", fetch: ok.fetch, baseUrl: "http://localhost:9999", expectedMode: "unchecked" }, PK)).toMatchObject({ kind: "found" });
     expect(ok.f).toHaveBeenCalledTimes(2);
   });
 });
@@ -423,5 +423,24 @@ describe("ALREADY_CANCELED 부분 요청의 몫 확인", () => {
     const input = { paymentKey: PK, cancelReason: "x", cancelAmount: 6000, alreadyCanceledTotal: 4000, idempotencyKey: cancelIdempotencyKey({ paymentKey: PK, cancelAmount: 6000, alreadyCanceledTotal: 4000 }) };
 
     expect(await cancelPayment(cfgOf(mk(ac, resp(other))), input)).toMatchObject({ kind: "not_cancelable", code: "ALREADY_CANCELED_PAYMENT" });
+  });
+});
+
+describe("expectedMode unchecked 제한", () => {
+  it("baseUrl 이 없거나 토스 도메인이면 live 키·test 키 모두 거부(네트워크 호출 없음)", async () => {
+    for (const baseUrl of [undefined, "https://api.tosspayments.com", "https://API.TossPayments.com:443/x", "https://sub.tosspayments.com", "not a url"]) {
+      const m = mk(resp(pay()));
+
+      await expect(getPayment({ secretKey: "live_sk_realkey", fetch: m.fetch, baseUrl, expectedMode: "unchecked" }, PK)).rejects.toThrow(/KEY_MODE_UNCHECKED_FORBIDDEN/);
+      expect(m.f).not.toHaveBeenCalled();
+    }
+  });
+
+  it("모의 서버 도메인(localhost·내부 호스트·tosspayments.com.evil 형태 아님 확인)은 허용", async () => {
+    for (const baseUrl of ["http://localhost:8080", "https://mock.internal.example", "https://tosspayments.com.example.test"]) {
+      const m = mk(resp(pay()));
+
+      expect(await getPayment({ secretKey: "fake", fetch: m.fetch, baseUrl, expectedMode: "unchecked" }, PK)).toMatchObject({ kind: "found" });
+    }
   });
 });
