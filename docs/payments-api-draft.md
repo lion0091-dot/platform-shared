@@ -190,3 +190,19 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 | wholesale | `lib/payments/pg-reconcile.ts:18,143,246,248,255` | `payment.status !== "DONE"` 직접 비교 → `interpretPayment`. 승인에 `Idempotency-Key` 없음 → 모듈 기본 키 사용 |
 | wholesale | `lib/payments/pg-webhook.ts:13,78,92,111,116`, `app/api/webhooks/toss/[wholesalerId]/route.ts:5,64` | 재조회 방식은 `verifyPaymentWebhook` 으로 대체 가능. L111 의 잔액 0 `PARTIAL_CANCELED` 처리(부분 취소로 취급)를 모듈 판정(완전 취소)과 맞춘다 |
 - 의미 차이(컴파일은 되지만 동작이 바뀜): 재승인 200 DONE 은 `success`(앱의 DB 조건부 UPDATE 로 이중 반영 방지), 부분 취소는 취소 직전 조회한 누계를 `alreadyCanceledTotal` 로 전달, `uncertain`/`processing` 은 FAILED 확정 금지.
+
+## 10. 토스 공식 문서 대조 현황 (2026-10-17 열람, 열람 도구의 요약 출력 기준)
+| 항목 | 상태 | 출처 |
+|---|---|---|
+| Payment 객체 필드(`secret`·`virtualAccount`·`currency`·`taxFreeAmount`·`suppliedAmount`·`vat`·`balanceAmount`·`status` 값·`cancels` 필드) | 문서 표로 대조됨. **`GET` 응답에 `secret` 이 실제로 오는지는 실호출 미시험**(문서는 Payment 객체 필드로 기재) | https://docs.tosspayments.com/reference |
+| 취소 API 파라미터(`refundReceiveAccount`·`taxFreeAmount`·`currency`, `refundableAmount` 는 DEPRECATED) | 문서 대조됨 | https://docs.tosspayments.com/reference |
+| 에러 코드별 HTTP 상태·메시지(승인 49·취소 32건 표 대조) | 문서 대조됨 | https://docs.tosspayments.com/reference/error-codes |
+| `FDS_ERROR`(403): 본인 인증 뒤 결제 가능 | 문서 문구로 확인("발송된 문자에 포함된 링크를 통해 본인인증 후 결제가 가능"), 실호출 미시험 | https://docs.tosspayments.com/reference/error-codes |
+| 입금 웹훅(`DEPOSIT_CALLBACK`) 필드·secret 대조 방법, 결제 상태 웹훅 `data`=Payment 객체, 서명 헤더는 지급대행·셀러 전용 | 문서 대조됨(결제 상태 웹훅의 `data.secret` 실제 값은 실호출 미시험) | https://docs.tosspayments.com/reference/using-api/webhook-events |
+| 웹훅 출발 IP 허용 목록·HTTPS | 보안 가이드에 안내됨(검증 방법으로 제시된 것은 아님) | https://docs.tosspayments.com/reference/using-api/security |
+| 시크릿 키 접두사 `test_sk_`/`live_sk_`/`test_gsk_`/`live_gsk_` 형식 | **문서 미대조**(관례·앱 코드 정규식 기반; 이 모듈의 `tossKeyMode` 가정) | — |
+| 멱등키가 에러 응답도 재생하는지·15일 이후, 429 Retry-After, 면세 부분 취소 동작, 가상계좌 실발급·환불 | **문서 미대조 / 실호출 미시험** | — |
+
+## 11. 버전 메모
+- v0.3.0-rc.1(`0db3db3`)은 이미 공개 태그다. 이번 변경(CHANGELOG.md 의 BREAKING 포함)은 같은 `0.3.0` 계열의 **다음 rc 에서 breaking 이 다시 들어가는** 것이다(rc 는 안정 API 를 약속하지 않는 사전 배포라는 전제). 두 앱은 `#v0.2.2` 고정이라 rc.1 을 쓰는 곳은 없다.
+- 다음 버전 번호(`0.3.0-rc.2` 로 이어갈지, breaking 이 크므로 `0.4.0-rc.1` 로 올릴지)는 공개 push·태그 시점에 사장님이 결정한다. 이 문서·CHANGELOG 의 "Unreleased" 표기는 그때 확정 번호로 바꾼다.

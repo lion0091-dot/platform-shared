@@ -2,9 +2,11 @@
 
 `@platform/shared/payments` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
-## Unreleased (v0.3.0-rc.2 예정, 아직 태그·병합 없음)
+## Unreleased (다음 rc 예정 — 번호 미정, 아직 태그·병합 없음)
 
 기준: v0.3.0-rc.1(`0db3db3`) 대비. 두 앱(shipping-prj·wholesale)은 아직 `#v0.2.2`(payments 없음)에 고정이라 **지금 깨지는 곳은 없고, 핀을 올릴 때부터 적용**된다.
+
+> **버전 메모**: v0.3.0-rc.1 이 이미 공개 태그인데 이 변경에서 breaking 이 다시 들어간다(rc 는 안정 API 약속 없음, 소비 앱은 아직 `#v0.2.2`). 다음 버전 번호(`0.3.0-rc.2` vs `0.4.0-rc.1`)는 공개 push·태그 시점에 사장님이 결정하고 그때 "Unreleased" 를 확정 번호로 바꾼다.
 
 ### BREAKING (타입·분기 영향)
 - `TossConfig.expectedMode` **필수**(`"test" | "live" | "unchecked"`). 생략하면 `KEY_MODE_REQUIRED` 를 던진다. 접두사(`test_sk_`·`live_sk_`, 위젯 `gsk`)와 다르면 `KEY_MODE_MISMATCH`. `"unchecked"` 는 토스 도메인이 아닌 `baseUrl`(모의 서버)에서만 허용(아니면 `KEY_MODE_UNCHECKED_FORBIDDEN`).
