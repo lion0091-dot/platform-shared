@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { cancelIdempotencyKey, cancelPayment, classifyTossError, confirmPayment, getPayment, getPaymentByOrderId } from "./index";
+import { canceledTotal, cancelIdempotencyKey, cancelPayment, classifyTossError, confirmPayment, getPayment, getPaymentByOrderId, interpretPayment } from "./index";
 
 // 가짜 값만 쓴다(실제 키 아님)
 const PK = "pk_fake_1234567890";
@@ -93,5 +93,28 @@ describe("401/403 가 HTML 로 올 때 (결정: 승인 401=uncertain, 조회·�
 
   it("JSON 본문이 있는 401 UNAUTHORIZED_KEY 는 승인에서도 fatal", async () => {
     expect(await confirm(mk(resp({ code: "UNAUTHORIZED_KEY", message: "m" }, 401)))).toMatchObject({ kind: "fatal", code: "UNAUTHORIZED_KEY" });
+  });
+});
+
+describe("취소 항목의 cancelStatus(DONE 만 합계에 포함)", () => {
+  const entry = (cancelAmount: number, cancelStatus: string | undefined) => ({ cancelAmount, cancelReason: "x", ...(cancelStatus ? { cancelStatus } : {}) });
+  const input = { paymentKey: PK, cancelReason: "x", cancelAmount: 3000, alreadyCanceledTotal: 0, idempotencyKey: cancelIdempotencyKey({ paymentKey: PK, cancelAmount: 3000, alreadyCanceledTotal: 0 }) };
+
+  it("취소 응답의 항목이 DONE 이 아니면(진행 중) 적용된 것으로 세지 않고 uncertain", async () => {
+    const pending = pay({ status: "PARTIAL_CANCELED", balanceAmount: null, cancels: [entry(3000, "IN_PROGRESS")] });
+
+    expect(await cancelPayment(cfgOf(mk(resp(pending), resp(pending))), input)).toMatchObject({ kind: "uncertain" });
+  });
+
+  it("DONE·값 없음은 포함, 진행 중·실패는 제외(canceledTotal·완전 취소 판정)", () => {
+    const base = { status: "PARTIAL_CANCELED", totalAmount: 10000, balanceAmount: null };
+    const c = (a: number, st: string | null) => ({ cancelAmount: a, cancelReason: "", canceledAt: null, transactionKey: null, cancelStatus: st });
+
+    expect(canceledTotal({ ...base, cancels: [c(1000, "DONE"), c(2000, null), c(4000, "IN_PROGRESS"), c(3000, "FAILED")] })).toBe(3000);
+
+    const pending = { paymentKey: PK, orderId: OID, method: "", approvedAt: null, ...base, cancels: [c(5000, "DONE"), c(5000, "IN_PROGRESS")] };
+
+    expect(interpretPayment(pending, { orderId: OID, amount: 10000 })).toBe("partial_canceled");
+    expect(interpretPayment({ ...pending, cancels: [c(5000, "DONE"), c(5000, "DONE")] }, { orderId: OID, amount: 10000 })).toBe("canceled");
   });
 });

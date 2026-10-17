@@ -2,7 +2,7 @@ import { classifyTossError } from "./classify";
 import { assertIdempotencyKey, cancelIdempotencyKey, confirmIdempotencyKey } from "./idempotency";
 import { assertKeyMode } from "./keyMode";
 import { assertOrderId } from "./orderId";
-import { canceledTotal, isFullyCanceled } from "./status";
+import { canceledTotal, isDoneCancel, isFullyCanceled } from "./status";
 import type { CancelInput, CancelOutcome, PartialCancelCheck, ConfirmInput, ConfirmOutcome, LookupOutcome, TossCancel, TossConfig, TossPayment, TossVirtualAccount } from "./types";
 
 const BASE_URL = "https://api.tosspayments.com";
@@ -327,7 +327,7 @@ export async function cancelPayment(cfg: TossConfig, input: CancelInput): Promis
     } else {
       // 부분 취소: 같은 키 재사용으로 토스가 첫 응답을 그대로 돌려준 경우(실제 환불 없음)를 걸러낸다 — 취소 누계가 이번 금액만큼 늘었어야 한다.
       const expected = input.alreadyCanceledTotal! + input.cancelAmount;
-      const sum = p.cancels.reduce((s, c) => s + c.cancelAmount, 0);
+      const sum = p.cancels.filter(isDoneCancel).reduce((s, c) => s + c.cancelAmount, 0); // DONE 이 아닌 취소 항목(진행 중·실패)은 합계에서 제외
       const byBalance = p.balanceAmount === null ? null : p.totalAmount - p.balanceAmount;
       const ok = (p.cancels.length > 0 || byBalance !== null) && (p.cancels.length === 0 || sum === expected) && (byBalance === null || byBalance === expected);
 
@@ -409,5 +409,5 @@ const NOT_OWNED_MSG = "취소 누계는 맞지만 취소 이력에서 이 요청
 function ownsPartialCancel(p: TossPayment, input: CancelInput): boolean {
   const reason = [...input.cancelReason].slice(0, 200).join("");
 
-  return p.cancels.some((c) => c.cancelAmount === input.cancelAmount && c.cancelReason === reason);
+  return p.cancels.some((c) => isDoneCancel(c) && c.cancelAmount === input.cancelAmount && c.cancelReason === reason);
 }
