@@ -1,4 +1,5 @@
 import { getPayment, getPaymentByOrderId } from "./client";
+import { getPaymentSecret } from "./secret";
 import type { LookupOutcome, TossConfig, TossPayment } from "./types";
 
 /**
@@ -70,7 +71,7 @@ export async function verifyPaymentWebhook(cfg: TossConfig, body: unknown): Prom
   if (l.kind !== "found") return { kind: "lookup_failed", outcome: l };
 
   const received = isDeposit ? str(b.secret) : data ? str(data.secret) : null;
-  const known = l.payment.secret ?? null;
+  const known = getPaymentSecret(l.payment);
 
   if (isDeposit) {
     if (!known) return { kind: "rejected", reason: "SECRET_UNAVAILABLE" };

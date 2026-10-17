@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { verifyPaymentWebhook } from "./index";
+import { getPayment, getPaymentSecret, isWebhookSecretValid, verifyPaymentWebhook } from "./index";
 
 // 가짜 값만 쓴다(실제 키 아님)
 const PK = "pk_fake_1234567890";
@@ -67,5 +67,31 @@ describe("웹훅 검증(verifyPaymentWebhook): 본문 상태는 믿지 않고 �
     await expect(verifyPaymentWebhook({ secretKey: "test_sk_fake_secret", fetch: m.fetch, expectedMode: "live" }, body)).rejects.toThrow(/KEY_MODE_MISMATCH/);
     await expect(verifyPaymentWebhook({ secretKey: "test_sk_fake_secret", fetch: m.fetch, expectedMode: "live" }, dep("s1"))).rejects.toThrow(/KEY_MODE_MISMATCH/);
     expect(m.f).not.toHaveBeenCalled();
+  });
+});
+
+describe("secret 비열거와 명시적 접근", () => {
+  it("getPaymentSecret 는 원본에서 읽고, structuredClone·스프레드·JSON 을 거치면 사라져 대조는 fail-closed(false)", async () => {
+    const r = await getPayment(cfgOf(mk(resp(pay({ secret: "whsec_x" })))), PK);
+
+    expect(r.kind).toBe("found");
+
+    if (r.kind !== "found") return;
+
+    const p = r.payment;
+
+    expect(getPaymentSecret(p)).toBe("whsec_x");
+    expect(isWebhookSecretValid(getPaymentSecret(p), "whsec_x")).toBe(true);
+
+    for (const copy of [structuredClone(p), { ...p }, JSON.parse(JSON.stringify(p))]) {
+      expect(getPaymentSecret(copy)).toBeNull();
+      expect(isWebhookSecretValid(copy.secret, "whsec_x")).toBe(false);
+    }
+  });
+
+  it("secret 이 없거나 빈 문자열이면 null", async () => {
+    const r = await getPayment(cfgOf(mk(resp(pay()), resp(pay({ secret: "" })))), PK);
+
+    expect(r.kind === "found" && getPaymentSecret(r.payment)).toBeNull();
   });
 });

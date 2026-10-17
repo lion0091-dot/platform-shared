@@ -48,7 +48,7 @@ export interface TossPayment {
   taxFreeAmount?: number | null;
   suppliedAmount?: number | null;
   vat?: number | null;
-  /** 웹훅 진위 대조용 값(verifyPaymentWebhook·isWebhookSecretValid: 입금 웹훅 secret 또는 결제 상태 웹훅 data.secret 과 비교). **열거되지 않는 속성**이라 JSON.stringify·console.log·스프레드에 나오지 않는다(읽기는 payment.secret). 로그·저장 금지 */
+  /** 웹훅 진위 대조용 값(verifyPaymentWebhook·isWebhookSecretValid: 입금 웹훅 secret 또는 결제 상태 웹훅 data.secret 과 비교). **열거되지 않는 속성**이라 JSON.stringify·console.log·스프레드에 나오지 않고, **structuredClone·큐·캐시 직렬화를 거치면 사라진다**(읽기는 직렬화 전에 getPaymentSecret(payment)). 로그·저장 금지 */
   secret?: string | null;
   /** 가상계좌 결제일 때만 */
   virtualAccount?: TossVirtualAccount | null;
