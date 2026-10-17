@@ -237,3 +237,25 @@ describe("키 공백 처리·모의 서버", () => {
     expect((m.f.mock.calls[0] as unknown as [string])[0]).toBe(`http://localhost:9999/v1/payments/${PK}`);
   });
 });
+
+describe("timeoutMs 상한", () => {
+  it("2^31 이상·Infinity 여도 즉시 중단되지 않고 상한(120000)으로 대기한다", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const spy = vi.spyOn(globalThis, "setTimeout");
+      const m = mk(resp(pay()));
+
+      for (const t of [2 ** 31 + 10, Infinity, 10_000_000]) {
+        await getPayment({ ...cfgOf(m), timeoutMs: t } as never, PK).catch(() => null);
+      }
+
+      const delays = spy.mock.calls.map((c) => c[1]).filter((d) => typeof d === "number" && d >= 15_000);
+
+      expect(delays.every((d) => d === 15_000 || d === 120_000)).toBe(true);
+      expect(delays).toContain(120_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

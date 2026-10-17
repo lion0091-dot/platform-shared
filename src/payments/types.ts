@@ -7,7 +7,7 @@ export interface TossConfig {
   fetch?: typeof fetch;
   /** 기본 https://api.tosspayments.com */
   baseUrl?: string;
-  /** 호출 제한 시간(ms). 양의 유한수가 아니면 기본값을 쓴다. 기본 15000 */
+  /** 호출 제한 시간(ms). 양의 유한수가 아니면 기본값(15000)을 쓰고, 120000(TOSS_TIMEOUT_MAX_MS)보다 크면 그 값으로 줄인다. */
   timeoutMs?: number;
   /**
    * **필수.** 이 환경이 쓸 키 종류. 시크릿키 접두사(test_/live_)와 다르면 네트워크 호출 전에 KEY_MODE_MISMATCH 를 던진다.

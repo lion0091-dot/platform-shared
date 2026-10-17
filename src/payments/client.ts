@@ -7,6 +7,8 @@ import type { CancelInput, CancelOutcome, ConfirmInput, ConfirmOutcome, LookupOu
 
 const BASE_URL = "https://api.tosspayments.com";
 export const TOSS_TIMEOUT_MS = 15_000;
+/** 호출 제한 시간 상한. 이보다 크면(Infinity·2^31 이상 포함, setTimeout 오버플로 시 즉시 중단되는 문제 방지) 이 값으로 줄인다. */
+export const TOSS_TIMEOUT_MAX_MS = 120_000;
 
 type Raw =
   | { ok: true; body: Record<string, unknown> }
@@ -29,7 +31,7 @@ async function call(cfg: TossConfig, method: "GET" | "POST", path: string, opts:
   if (!cfg.expectedMode) throw new Error("KEY_MODE_REQUIRED: expectedMode(\"test\"|\"live\") 를 지정해야 한다. 접두사 없는 모의 키는 \"unchecked\".");
   if (cfg.expectedMode !== "unchecked") assertKeyMode(cfg.secretKey, cfg.expectedMode);
 
-  const timeoutMs = typeof cfg.timeoutMs === "number" && Number.isFinite(cfg.timeoutMs) && cfg.timeoutMs > 0 ? cfg.timeoutMs : TOSS_TIMEOUT_MS;
+  const timeoutMs = typeof cfg.timeoutMs === "number" && Number.isFinite(cfg.timeoutMs) && cfg.timeoutMs > 0 ? Math.min(cfg.timeoutMs, TOSS_TIMEOUT_MAX_MS) : TOSS_TIMEOUT_MS;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   // 환경변수에 섞여 들어온 앞뒤 공백·개행은 지우고 보낸다(키 검사와 같은 기준)
