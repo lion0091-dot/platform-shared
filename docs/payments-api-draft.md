@@ -1,10 +1,10 @@
 # 공용 결제 라이브러리 초안 — `@platform/shared/payments`
 
-상태: 초안(버전·태그 없음, 모의 시험만 통과, 실제 토스 호출 없음). 대상: meatpartners·shipping 개발자. 근거: docs.tosspayments.com 의 에러 코드·멱등키 페이지(2026-10-16 열람), 두 앱의 기존 결제 코드. 문서에서 확인 못 한 것은 "미확인".
+상태: 초안(버전·태그 없음, 모의 시험만 통과, 실제 토스 호출 없음). 대상: 소비 앱 개발자. 근거: docs.tosspayments.com 의 에러 코드·멱등키 페이지(2026-10-16 열람), 소비 앱의 기존 결제 코드. 문서에서 확인 못 한 것은 "미확인".
 
 ## 1. 범위
 포함: 승인(confirm)·조회(주문번호/paymentKey)·취소(cancel) 호출, Basic 인증, 타임아웃, Idempotency-Key 규칙, 승인 응답 검증, 오류 분류, failUrl code 분류, 주문번호 검증·생성.
-제외(앱이 한다): 주문 생성·금액 산정·DB·RLS·장부·정산·알림, 각 앱의 상태머신(meatpartners pending 테이블 / shipping PENDING 상태), 결제창 SDK 래퍼(v1/v2 통일은 2단계), 웹훅 수신, 재시도 스케줄(크론). 라이브러리는 **호출 한 번 + 분류**만 하고 내부에서 재시도하지 않는다. 비밀값은 받기만 하고 저장·기록하지 않는다(공개 저장소).
+제외(앱이 한다): 주문 생성·금액 산정·DB·RLS·장부·정산·알림, 각 앱의 상태머신(예: 대기 테이블·PENDING 상태), 결제창 SDK 래퍼(v1/v2 통일은 2단계), 웹훅 수신, 재시도 스케줄(크론). 라이브러리는 **호출 한 번 + 분류**만 하고 내부에서 재시도하지 않는다. 비밀값은 받기만 하고 저장·기록하지 않는다(공개 저장소).
 
 ## 2. 사용법
 ```ts
@@ -55,7 +55,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 
 **"결제 안 됨" 보장이 없는 코드(`CARD_PROCESSING_ERROR`·`UNAPPROVED_ORDER_ID`·`UNKNOWN_PAYMENT_ERROR`·`FDS_ERROR`·모르는 코드)는 `uncertain` 으로 두고, 앱은 `getPaymentByOrderId` 결과가 `ABORTED`/`EXPIRED`(`interpretPayment`=`not_paid`)이면 그때 실패로 닫는다**(`DONE` 이면 완료 반영, 진행 중이면 PENDING 유지 후 재조회, 앱 만료 시각이 지나도 계속 `in_progress` 이면 운영 알림). 코드를 보고 바로 FAILED 로 굳히지 않는다 — 고아 결제 방지.
 
-참고: shipping 의 가짜 코드 `REJECT_CARD` 는 없다. 실제 코드는 `REJECT_CARD_PAYMENT`·`REJECT_CARD_COMPANY` 다(`REJECT_CARD_PAYMENT` 는 승인 API 섹션에만 있고 "전체 에러 목록"에는 없음 — 문서 내부 차이).
+참고: 일부 앱이 쓰던 가짜 코드 `REJECT_CARD` 는 없다. 실제 코드는 `REJECT_CARD_PAYMENT`·`REJECT_CARD_COMPANY` 다(`REJECT_CARD_PAYMENT` 는 승인 API 섹션에만 있고 "전체 에러 목록"에는 없음 — 문서 내부 차이).
 
 ### 3.2 조회 결과 판정(불확실 → 확정)
 `getPaymentByOrderId` 결과:
@@ -69,8 +69,8 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 | `retry_later`(`FORBIDDEN_CONSECUTIVE_REQUEST`·429) / `uncertain`(5xx·타임아웃·형식 이상) | 조회 실패 | PENDING 유지, 잠시 뒤 재조회 |
 | `fatal` (401·403 등) | 키·권한 | 알림 |
 코드 없는 404(프록시·잘못된 `baseUrl`)나 다른 코드의 404 는 `not_found` 가 아니라 `uncertain` 이다(2026-10-17 변경). **confirm 이 `processing`/`uncertain`(요청이 아직 처리 중일 수 있음)인 동안의 `not_found` 로 실패를 확정하지 않는다** — 토스 쪽 반영이 늦을 수 있으니 아래 유예를 지킨다.
-**`not_found` 로 "승인 없음"을 포기·확정하는 유예(권장)**: 승인 호출 시각으로부터 **최소 30분 이상**이면서 **앱의 결제 만료 시각 이후**에만 포기한다(승인 유효시간이 문서에서 10분 vs 30분으로 달라 보수적으로 큰 쪽을 쓴다 — 근거는 shipping 점검표 인용, 이번에 재확인 안 함). 그 전의 `not_found` 는 PENDING 유지 후 재조회.
-조회 응답 DONE 의 `totalAmount` 는 최초 결제 금액이며 취소돼도 변하지 않는다(shipping 점검표 기준).
+**`not_found` 로 "승인 없음"을 포기·확정하는 유예(권장)**: 승인 호출 시각으로부터 **최소 30분 이상**이면서 **앱의 결제 만료 시각 이후**에만 포기한다(승인 유효시간이 문서에서 10분 vs 30분으로 달라 보수적으로 큰 쪽을 쓴다 — 근거는 내부 점검표 인용, 이번에 재확인 안 함). 그 전의 `not_found` 는 PENDING 유지 후 재조회.
+조회 응답 DONE 의 `totalAmount` 는 최초 결제 금액이며 취소돼도 변하지 않는다(내부 점검표 기준).
 
 ### 3.3 취소(cancel)
 | 토스 응답 | `kind` | 앱이 할 일 |
@@ -115,7 +115,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - `cancelApprovedMismatch(cfg, outcome)` / `client.cancelApprovedMismatch`: `approved_mismatch` 결제를 **표준 전액 취소 키**로 취소하는 호출 통일 도우미. 취소할지(자동/사람 확인 후)는 앱이 정한다(§5-6).
 
 ## 5. 앱이 DB 에 반영할 때 지킬 규칙
-1. **불확실(`uncertain`·`processing`·`already_done`·`approved_mismatch`)은 FAILED 로 확정하지 않는다.** PENDING(또는 pending 테이블 행)을 유지하고 `getPaymentByOrderId` → `interpretPayment` 로 확정한다. FAILED 로 한 번 굳으면 승인이 실제로 됐어도 되살릴 수 없다(shipping 점검표 P1).
+1. **불확실(`uncertain`·`processing`·`already_done`·`approved_mismatch`)은 FAILED 로 확정하지 않는다.** PENDING(또는 pending 테이블 행)을 유지하고 `getPaymentByOrderId` → `interpretPayment` 로 확정한다. FAILED 로 한 번 굳으면 승인이 실제로 됐어도 되살릴 수 없다(내부 점검표 P1).
 2. 완료 반영 조건은 (a) `confirm.success` 또는 (b) 조회 `paid` 이며 **orderId·금액이 앱이 DB 에서 가져온 값과 일치**할 때뿐이다. 클라이언트가 준 amount 는 신뢰하지 않는다.
 3. 같은 주문의 두 번째 요청(연타·새로고침)은 `processing`/`already_done` 으로 온다 — 실패로 보지 말고 조회로 수렴시킨다.
 3-1. **`success` 는 "이번 호출이 처음 승인했다"는 뜻이 아니다.** 이미 DONE 인 같은 orderId·paymentKey·amount 로 confirm 을 다시 보내면 토스는 `ALREADY_PROCESSED_PAYMENT` 가 아니라 **200 DONE 을 그대로** 돌려준다(같은 멱등키·다른 멱등키 모두, 2026-10-16 실측). 그러므로 앱은 success 를 받아도 DB 의 현재 상태를 조건부 UPDATE(`WHERE status <> 'PAID'` 등, 영향 행 수 확인)로 먼저 본 뒤 **처음 PAID 로 바뀐 요청만** 정산·모집 시작 같은 후속 반영을 한다. `ALREADY_PROCESSED_PAYMENT` 는 Test-Code 헤더로만 재현됐다(실결제 응답은 미확인).
@@ -125,20 +125,20 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 7. 로그에 시크릿키·카드 정보 금지. 오류 메시지는 토스 `message` 를 300자까지만 담아 돌려준다(사용자 화면에 그대로 노출할지는 앱이 결정).
 
 ## 6. 소비 앱 요구사항
-### shipping(shipping-prj, 요구 5건 — 대장 전달, 2026-10-16)
-1. 게이트웨이 인터페이스에 `lookupByOrderId` 포함 → `createTossClient` 가 `confirm`·`lookupByOrderId`·`lookup`·`cancel` 을 제공. (shipping 의 `PaymentGateway`/`NotConfiguredGateway`(키 없을 때 fail-closed)는 앱에 남기고 어댑터만 이 모듈로 교체하면 된다.)
+### 소비 앱 A(요구 5건, 2026-10-16)
+1. 게이트웨이 인터페이스에 `lookupByOrderId` 포함 → `createTossClient` 가 `confirm`·`lookupByOrderId`·`lookup`·`cancel` 을 제공. (앱 A 의 `PaymentGateway`/`NotConfiguredGateway`(키 없을 때 fail-closed)는 앱에 남기고 어댑터만 이 모듈로 교체하면 된다.)
 2. confirm 멱등키 = 주문번호+paymentKey 조합, 300자 이하 → `confirmIdempotencyKey`(§4).
 3. 오류 3분류 → §3.1·§3.2. 조회 판정: DONE+orderId·금액 일치=승인, ABORTED·EXPIRED·CANCELED=확정 실패, NOT_FOUND=승인 없음. 실제 코드명 사용(`REJECT_CARD_PAYMENT`).
 4. 취소 3종 → §3.3(`ALREADY_*`는 조회 확인 후 성공, `FORBIDDEN_CONSECUTIVE_REQUEST`는 재시도).
 5. 200 이지만 금액·주문번호 불일치 → `approved_mismatch`, 취소 호출 여부는 앱이 결정(§3.1).
 - 후속 검토 반영(2026-10-16): `INVALID_REQUEST`→fatal(R1), `TossPayment` 에 `balanceAmount`·`cancels`(R2), confirm 검증 순서 status 먼저(R3), confirm·lookup orderId 형식 사전 검증(R5). `approved_mismatch` 후속(취소 연계)은 앱 몫(R4).
-- 주의: 이 5건 중 shipping 최신 커밋(`fix/payment-uncertain-states`, a3175be)의 `gateway.ts`·`toss.ts`·`service.ts` 를 이 초안 작성 중에 다시 읽지 못했다(작업 격리 제한). 소비 시 `Failure{code,message}` 형태의 기존 반환과 이 라이브러리의 `kind` 반환 사이의 어댑터는 shipping 담당이 맞춘다.
-### meatpartners(wholesale 폴더, 결제 코드 `lib/payments/tosspayments-client.ts`·`pg-reconcile.ts`)
+- 주의: 소비 시 `Failure{code,message}` 형태의 기존 반환과 이 라이브러리의 `kind` 반환 사이의 어댑터는 앱 A 쪽에서 맞춘다.
+### 소비 앱 B(pending 테이블 방식, 기존 결제 코드는 예외를 던지는 클라이언트와 대조 크론으로 구성)
 - **pending 테이블 방식을 유지**한다(라이브러리는 DB 모델을 모른다). 이 모듈은 현재 `confirmPayment`/`getPaymentByOrderId`/`cancelPayment` 의 호출·오류 해석만 대체한다.
 - 현재 코드는 예외(`TossPaymentsError{code}`)를 던지는 방식, 이 모듈은 값(`kind`)을 반환 → 호출부를 `switch(kind)` 로 바꿔야 한다. 기존 `getPaymentByOrderId` 의 404→`null` 은 `not_found`.
 - 기존에 없던 것: 승인·취소 `Idempotency-Key`, 승인 응답 `status===DONE`·금액 검증(현재는 호출부가 함), 조회 후 확정 규칙. 대조 크론은 `uncertain/processing` 을 만났을 때 PENDING 유지.
 - **결제창 SDK 는 2단계**(이 모듈에 없음). 현재 SDK 를 그대로 쓴다.
-- 취소는 현재 전액(`cancelAmount` 생략)만 쓴다 → 그대로 호환. 부분취소를 쓸 때는 §4 의 누계 규칙(취소 전 조회해 `alreadyCanceledTotal` 전달)을 따른다. shipping 은 부분 환불을 쓰므로 기존 키 `refund-<id>-<기환불합계>-<금액>` 과 같은 발상이지만 이 모듈의 키 함수로 바꾸면 기존 진행 중 취소의 키가 달라지니 전환 시점에 진행 중인 취소가 없는지 확인한다.
+- 취소는 현재 전액(`cancelAmount` 생략)만 쓴다 → 그대로 호환. 부분취소를 쓸 때는 §4 의 누계 규칙(취소 전 조회해 `alreadyCanceledTotal` 전달)을 따른다. 앱 A 는 부분 환불을 쓰므로 기존 키 `refund-<id>-<기환불합계>-<금액>` 과 같은 발상이지만 이 모듈의 키 함수로 바꾸면 기존 진행 중 취소의 키가 달라지니 전환 시점에 진행 중인 취소가 없는지 확인한다.
 ### 공통
 - 취소 키는 모든 취소 경로(`approved_mismatch` 후속, 핫딜 매진·재고 부족 등 자동 환불, 운영자 취소)에서 **반드시 `cancelIdempotencyKey`** 로 만든다. 앱이 임의 키를 만들지 않는다(§4).
 - 크론이 `not_found` 로 포기하기 전 유예는 승인 호출 후 30분 이상 + 앱 만료 시각 이후(§3.2).
@@ -148,7 +148,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 ## 7. 미확인 항목
 - 취소 완료 판정: 부분 취소로 잔액을 0 까지 만들어도 토스 status 는 `PARTIAL_CANCELED` 로 남는다(실측) → `interpretPayment`·`cancelPayment` 의 이미 취소 확인은 `CANCELED` 이거나 `PARTIAL_CANCELED`+`balanceAmount===0` 을 완전 취소로 본다. **미시험**: 한 번에 전액 취소 요청한 응답이 `PARTIAL_CANCELED`+balance 0 인 경우(현행: `uncertain`, 조회로 확정). 이미 전액 취소된 결제의 재취소는 `NOT_CANCELABLE_AMOUNT`("취소 할 수 없는 금액 입니다.", 실측) → `not_cancelable`.
 - 공식 문서에 `IDEMPOTENT_REQUEST_PROCESSING` 은 멱등키 페이지에만 있고 에러 코드 페이지에는 없다(대신 `ALREADY_PROCESSING_REQUEST` 400). 둘 다 `processing` 으로 처리.
-- 승인 유효 시간: 승인 API 문서 10분 vs Payment 객체 `EXPIRED` 설명 30분(shipping 점검표 인용, 이번에 재확인 안 함).
+- 승인 유효 시간: 승인 API 문서 10분 vs Payment 객체 `EXPIRED` 설명 30분(내부 점검표 인용, 이번에 재확인 안 함).
 - `FORBIDDEN_CONSECUTIVE_REQUEST` 가 confirm 에서 오는지: 문서는 조회·취소에만 기재 → confirm 에서는 모르는 코드로 보아 `uncertain`.
 - 429 의 실제 발생·재시도 정책, 승인 직후 주문번호 조회의 반영 지연, paymentKey 최대 길이, 멱등키 허용 문자.
 - 웹훅 수신 자체(서버 라우트)는 범위 밖. 진위 대조는 §8 의 `isWebhookSecretValid` 로 제공(공식 Payment.secret 설명 근거; 웹훅 가이드 페이지에는 검증 절차가 없어 헤더 서명은 확인 못 함).
@@ -176,19 +176,19 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - 이벤트 종류(`PAYMENT_STATUS_CHANGED`·`DEPOSIT_CALLBACK`·`CANCEL_STATUS_CHANGED` 등)는 토스 웹훅 가이드 참고. 이 모듈은 수신 라우트·재시도 응답(10초 내 200)을 다루지 않는다.
 
 ## 9. 소비 앱 전환 지점·마이그레이션 (2026-10-17, 읽기 확인; 상세 변경 목록은 CHANGELOG.md)
-- 현재 핀: shipping-prj/package.json:19, wholesale/package.json:18 모두 `#v0.2.2`(payments export 없음). 두 앱은 아직 `@platform/shared/payments` 를 import 하지 않는다 → 핀을 올리기 전에는 영향 없음.
+- 현재 핀: 소비 앱 두 곳 모두 `#v0.2.2`(payments export 없음). 두 앱 모두 아직 `@platform/shared/payments` 를 import 하지 않는다 → 핀을 올리기 전에는 영향 없음.
 - 어댑터 시그니처에 이 모듈을 쓸 때 컴파일이 깨지는 곳(exhaustive `switch`): `ConfirmOutcome.waiting_for_deposit`, `PaymentInterpretation.waiting_for_deposit`, `ConfirmMismatchReason.CURRENCY_MISMATCH`. `TossConfig` 에는 `expectedMode` 를 반드시 넣는다.
 
-| 앱 | 파일:줄 | 전환 할 일 (breaking 항목 연결) |
+| 앱 | 대상 | 전환 할 일 (breaking 항목 연결) |
 |---|---|---|
-| shipping-prj | `lib/payments/toss.ts` 전체(`confirm` L73, `lookup` L95, `lookupPath` L103, `refund` L115) | `TossPaymentsGateway` 를 `createTossClient({secretKey, expectedMode})` 어댑터로 교체. `ConfirmOutcome.kind` → 기존 `ConfirmResult/Failure{code,message}` 변환 switch 에 `waiting_for_deposit`(카드만이면 도달 불가, 방어 분기) 포함 |
-| shipping-prj | `lib/payments/service.ts:11~16` `DEFINITE_FAILURE`, `:21` `DEAD_STATUS`, `:29~40` `judge`, `:114` `settleFailedConfirm` | 자체 확정 실패 목록과 모듈 분류(`fatal`/`uncertain`/`session_expired`)가 이중 → 모듈 분류 사용으로 통일(`MISMATCH`·`AMOUNT_MISMATCH` 는 앱 코드). `judge` 의 status 문자열 비교는 `interpretPayment`(`waiting_for_deposit` 포함)로 대체 |
-| shipping-prj | `lib/payments/tenant-gateway.ts:22` `SECRET_KEY_RE`(test/live_sk_) | 운영사 키의 모드를 `expectedMode` 로 전달. 모듈은 `gsk` 도 허용(superset) |
-| wholesale | `lib/payments/tosspayments-client.ts`(`confirmPayment` L68, `getPaymentByOrderId` L128, `cancelPayment` L174; 예외 던지는 방식) | 값 반환(`kind`) 방식으로 교체. 404→`null` 은 `not_found`(코드 `NOT_FOUND_PAYMENT` 일 때만) |
-| wholesale | `app/shop/[shop_token]/checkout/pg/success/route.ts:4,85,120` | `confirmPayment` + `catch(TossPaymentsError)` → `kind` switch. `already_done`·`uncertain`·`processing` 은 PENDING 유지 경로, `session_expired` 는 안내 전 `lookupByOrderId` |
-| wholesale | `app/dashboard/orders/actions.ts:22,248,257,691,698~701` | `cancelPayment` + `ALREADY_CANCELED_PAYMENT` 문자열 비교 → `canceled.alreadyCanceled`/`not_cancelable`. 전액 취소 키 `cancelIdempotencyKey({paymentKey})` 도입 |
-| wholesale | `lib/payments/pg-reconcile.ts:18,143,246,248,255` | `payment.status !== "DONE"` 직접 비교 → `interpretPayment`. 승인에 `Idempotency-Key` 없음 → 모듈 기본 키 사용 |
-| wholesale | `lib/payments/pg-webhook.ts:13,78,92,111,116`, `app/api/webhooks/toss/[wholesalerId]/route.ts:5,64` | 재조회 방식은 `verifyPaymentWebhook` 으로 대체 가능. L111 의 잔액 0 `PARTIAL_CANCELED` 처리(부분 취소로 취급)를 모듈 판정(완전 취소)과 맞춘다 |
+| 앱 A | 결제 게이트웨이 어댑터 | `TossPaymentsGateway` 를 `createTossClient({secretKey, expectedMode})` 어댑터로 교체. `ConfirmOutcome.kind` → 기존 `ConfirmResult/Failure{code,message}` 변환 switch 에 `waiting_for_deposit`(카드만이면 도달 불가, 방어 분기) 포함 |
+| 앱 A | 결제 서비스의 자체 확정 실패 목록·판정 함수 | 자체 확정 실패 목록과 모듈 분류(`fatal`/`uncertain`/`session_expired`)가 이중 → 모듈 분류 사용으로 통일(`MISMATCH`·`AMOUNT_MISMATCH` 는 앱 코드). status 문자열 비교는 `interpretPayment`(`waiting_for_deposit` 포함)로 대체 |
+| 앱 A | 운영사별 키 검증 정규식 | 운영사 키의 모드를 `expectedMode` 로 전달. 모듈은 `gsk` 도 허용(superset) |
+| 앱 B | 결제 클라이언트(예외를 던지는 방식) | 값 반환(`kind`) 방식으로 교체. 404→`null` 은 `not_found`(코드 `NOT_FOUND_PAYMENT` 일 때만) |
+| 앱 B | 결제 성공 콜백 라우트 | `confirmPayment` + `catch(TossPaymentsError)` → `kind` switch. `already_done`·`uncertain`·`processing` 은 PENDING 유지 경로, `session_expired` 는 안내 전 `lookupByOrderId` |
+| 앱 B | 주문 취소 처리 | `cancelPayment` + `ALREADY_CANCELED_PAYMENT` 문자열 비교 → `canceled.alreadyCanceled`/`not_cancelable`. 전액 취소 키 `cancelIdempotencyKey({paymentKey})` 도입 |
+| 앱 B | 대조(reconcile) 크론 | `payment.status !== "DONE"` 직접 비교 → `interpretPayment`. 승인에 `Idempotency-Key` 없음 → 모듈 기본 키 사용 |
+| 앱 B | 웹훅 처리·수신 라우트 | 재조회 방식은 `verifyPaymentWebhook` 으로 대체 가능. 잔액 0 `PARTIAL_CANCELED` 처리(부분 취소로 취급)를 모듈 판정(완전 취소)과 맞춘다 |
 - 의미 차이(컴파일은 되지만 동작이 바뀜): 재승인 200 DONE 은 `success`(앱의 DB 조건부 UPDATE 로 이중 반영 방지), 부분 취소는 취소 직전 조회한 누계를 `alreadyCanceledTotal` 로 전달, `uncertain`/`processing` 은 FAILED 확정 금지.
 
 ## 10. 토스 공식 문서 대조 현황 (2026-10-17 열람, 열람 도구의 요약 출력 기준)
@@ -205,4 +205,4 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 
 ## 11. 버전 메모
 - v0.3.0-rc.1(`0db3db3`)은 이미 공개 태그다. 이번 변경(CHANGELOG.md 의 BREAKING 포함)은 같은 `0.3.0` 계열의 **다음 rc 에서 breaking 이 다시 들어가는** 것이다(rc 는 안정 API 를 약속하지 않는 사전 배포라는 전제). 두 앱은 `#v0.2.2` 고정이라 rc.1 을 쓰는 곳은 없다.
-- 다음 버전 번호(`0.3.0-rc.2` 로 이어갈지, breaking 이 크므로 `0.4.0-rc.1` 로 올릴지)는 공개 push·태그 시점에 사장님이 결정한다. 이 문서·CHANGELOG 의 "Unreleased" 표기는 그때 확정 번호로 바꾼다.
+- 다음 버전 번호(`0.3.0-rc.2` 로 이어갈지, breaking 이 크므로 `0.4.0-rc.1` 로 올릴지)는 공개 push·태그 시점에 저장소 관리자가 결정한다. 이 문서·CHANGELOG 의 "Unreleased" 표기는 그때 확정 번호로 바꾼다.
