@@ -61,9 +61,10 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 | `found` + `not_paid` (ABORTED·EXPIRED) 또는 `canceled` (CANCELED) | 승인 안 됨 확정 | 실패 확정(CANCELED 는 승인됐다가 취소된 것 — 이 결제로는 미결제) |
 | `found` + `in_progress` (READY·IN_PROGRESS·WAITING_FOR_DEPOSIT 등) | 아직 진행 | PENDING 유지, 나중에 다시 조회 |
 | `found` + `mismatch` | 주문번호·금액이 기대와 다름 | 자동 확정 금지, 사람이 확인(승인됐다면 취소 연계) |
-| `not_found` (404) | 그 주문번호로 승인된 결제 없음 | 승인 없음. 단 막 호출한 직후라면 지연 가능성이 있어 앱이 유예 시간을 정한다(미확인: 토스 쪽 반영 지연) |
+| `not_found` (404 + 코드 `NOT_FOUND_PAYMENT` **일 때만**) | 그 주문번호로 승인된 결제 없음 | 승인 없음. 단 막 호출한 직후라면 지연 가능성이 있어 앱이 유예 시간을 정한다(미확인: 토스 쪽 반영 지연) |
 | `retry_later`(`FORBIDDEN_CONSECUTIVE_REQUEST`·429) / `uncertain`(5xx·타임아웃·형식 이상) | 조회 실패 | PENDING 유지, 잠시 뒤 재조회 |
 | `fatal` (401·403 등) | 키·권한 | 알림 |
+코드 없는 404(프록시·잘못된 `baseUrl`)나 다른 코드의 404 는 `not_found` 가 아니라 `uncertain` 이다(2026-10-17 변경). **confirm 이 `processing`/`uncertain`(요청이 아직 처리 중일 수 있음)인 동안의 `not_found` 로 실패를 확정하지 않는다** — 토스 쪽 반영이 늦을 수 있으니 아래 유예를 지킨다.
 **`not_found` 로 "승인 없음"을 포기·확정하는 유예(권장)**: 승인 호출 시각으로부터 **최소 30분 이상**이면서 **앱의 결제 만료 시각 이후**에만 포기한다(승인 유효시간이 문서에서 10분 vs 30분으로 달라 보수적으로 큰 쪽을 쓴다 — 근거는 shipping 점검표 인용, 이번에 재확인 안 함). 그 전의 `not_found` 는 PENDING 유지 후 재조회.
 조회 응답 DONE 의 `totalAmount` 는 최초 결제 금액이며 취소돼도 변하지 않는다(shipping 점검표 기준).
 

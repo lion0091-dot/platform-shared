@@ -157,7 +157,10 @@ describe("confirm 분류표", () => {
     expect((await confirm(mk(err(404, "NOT_FOUND_PAYMENT_SESSION")))).kind).toBe("session_expired");
     expect((await confirm(mk(err(404, "NOT_FOUND_PAYMENT")))).kind).toBe("fatal");
     expect((await getPaymentByOrderId(cfgOf(mk(err(404, "NOT_FOUND_PAYMENT"))), OID)).kind).toBe("not_found");
-    expect((await getPaymentByOrderId(cfgOf(mk(err(404, "NOT_FOUND_PAYMENT_SESSION"))), OID)).kind).toBe("not_found");
+    // 코드가 NOT_FOUND_PAYMENT 가 아닌 404(다른 코드·코드 없는 프록시/baseUrl 오류 404)는 "결제 없음"이 아니라 불확실
+    expect((await getPaymentByOrderId(cfgOf(mk(err(404, "NOT_FOUND_PAYMENT_SESSION"))), OID)).kind).toBe("uncertain");
+    expect((await getPaymentByOrderId(cfgOf(mk(new Response("<html>404</html>", { status: 404 }))), OID)).kind).toBe("uncertain");
+    expect((await getPayment(cfgOf(mk(err(404, "NOT_FOUND"))), PK)).kind).toBe("uncertain");
   });
 
   it("잘못된 입력은 호출 전에 던진다(금액·키)", async () => {

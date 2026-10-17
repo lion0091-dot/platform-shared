@@ -98,7 +98,8 @@ export function classifyTossError(op: Op, httpStatus: number, code: string): Err
   if (op !== "confirm" && code === "FORBIDDEN_CONSECUTIVE_REQUEST") return "retry_later";
   if (httpStatus === 429) return op === "confirm" ? "uncertain" : "retry_later";
   if (UNCERTAIN.has(code) || httpStatus >= 500) return "uncertain";
-  if (op === "lookup" && (httpStatus === 404 || code === "NOT_FOUND_PAYMENT" || code === "NOT_FOUND")) return "not_found";
+  // 조회 not_found 는 토스가 NOT_FOUND_PAYMENT 코드로 답했을 때만. 코드 없는 404(프록시·잘못된 baseUrl·라우팅 오류)는 "결제 없음"이 아니라 불확실로 남긴다.
+  if (op === "lookup" && code === "NOT_FOUND_PAYMENT") return "not_found";
 
   // 분명한 실패: 문서에 올라 있고 "결제가 일어나지 않았음"이 분명한 코드만. 그 밖의 모르는 코드는 불확실(조회로 확정).
   if (DEFINITE_FAILURE.has(code)) return "fatal";
