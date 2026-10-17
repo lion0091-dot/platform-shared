@@ -170,3 +170,19 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
   - 추가 방어(앱): 웹훅 URL 에 HTTPS, 보안 가이드(https://docs.tosspayments.com/reference/using-api/security)의 출발 IP 허용 목록, 10초 안에 200 응답.
 - 가상계좌 취소는 `refundReceiveAccount` 필수(입금 전 취소는 해당 없을 수 있음 — 미확인). 환불 진행은 `payment.virtualAccount.refundStatus`·`cancels[].cancelStatus` 로 확인.
 - 이벤트 종류(`PAYMENT_STATUS_CHANGED`·`DEPOSIT_CALLBACK`·`CANCEL_STATUS_CHANGED` 등)는 토스 웹훅 가이드 참고. 이 모듈은 수신 라우트·재시도 응답(10초 내 200)을 다루지 않는다.
+
+## 9. 소비 앱 전환 지점·마이그레이션 (2026-10-17, 읽기 확인; 상세 변경 목록은 CHANGELOG.md)
+- 현재 핀: shipping-prj/package.json:19, wholesale/package.json:18 모두 `#v0.2.2`(payments export 없음). 두 앱은 아직 `@platform/shared/payments` 를 import 하지 않는다 → 핀을 올리기 전에는 영향 없음.
+- 어댑터 시그니처에 이 모듈을 쓸 때 컴파일이 깨지는 곳(exhaustive `switch`): `ConfirmOutcome.waiting_for_deposit`, `PaymentInterpretation.waiting_for_deposit`, `ConfirmMismatchReason.CURRENCY_MISMATCH`. `TossConfig` 에는 `expectedMode` 를 반드시 넣는다.
+
+| 앱 | 파일:줄 | 전환 할 일 (breaking 항목 연결) |
+|---|---|---|
+| shipping-prj | `lib/payments/toss.ts` 전체(`confirm` L73, `lookup` L95, `lookupPath` L103, `refund` L115) | `TossPaymentsGateway` 를 `createTossClient({secretKey, expectedMode})` 어댑터로 교체. `ConfirmOutcome.kind` → 기존 `ConfirmResult/Failure{code,message}` 변환 switch 에 `waiting_for_deposit`(카드만이면 도달 불가, 방어 분기) 포함 |
+| shipping-prj | `lib/payments/service.ts:11~16` `DEFINITE_FAILURE`, `:21` `DEAD_STATUS`, `:29~40` `judge`, `:114` `settleFailedConfirm` | 자체 확정 실패 목록과 모듈 분류(`fatal`/`uncertain`/`session_expired`)가 이중 → 모듈 분류 사용으로 통일(`MISMATCH`·`AMOUNT_MISMATCH` 는 앱 코드). `judge` 의 status 문자열 비교는 `interpretPayment`(`waiting_for_deposit` 포함)로 대체 |
+| shipping-prj | `lib/payments/tenant-gateway.ts:22` `SECRET_KEY_RE`(test/live_sk_) | 운영사 키의 모드를 `expectedMode` 로 전달. 모듈은 `gsk` 도 허용(superset) |
+| wholesale | `lib/payments/tosspayments-client.ts`(`confirmPayment` L68, `getPaymentByOrderId` L128, `cancelPayment` L174; 예외 던지는 방식) | 값 반환(`kind`) 방식으로 교체. 404→`null` 은 `not_found`(코드 `NOT_FOUND_PAYMENT` 일 때만) |
+| wholesale | `app/shop/[shop_token]/checkout/pg/success/route.ts:4,85,120` | `confirmPayment` + `catch(TossPaymentsError)` → `kind` switch. `already_done`·`uncertain`·`processing` 은 PENDING 유지 경로, `session_expired` 는 안내 전 `lookupByOrderId` |
+| wholesale | `app/dashboard/orders/actions.ts:22,248,257,691,698~701` | `cancelPayment` + `ALREADY_CANCELED_PAYMENT` 문자열 비교 → `canceled.alreadyCanceled`/`not_cancelable`. 전액 취소 키 `cancelIdempotencyKey({paymentKey})` 도입 |
+| wholesale | `lib/payments/pg-reconcile.ts:18,143,246,248,255` | `payment.status !== "DONE"` 직접 비교 → `interpretPayment`. 승인에 `Idempotency-Key` 없음 → 모듈 기본 키 사용 |
+| wholesale | `lib/payments/pg-webhook.ts:13,78,92,111,116`, `app/api/webhooks/toss/[wholesalerId]/route.ts:5,64` | 재조회 방식은 `verifyPaymentWebhook` 으로 대체 가능. L111 의 잔액 0 `PARTIAL_CANCELED` 처리(부분 취소로 취급)를 모듈 판정(완전 취소)과 맞춘다 |
+- 의미 차이(컴파일은 되지만 동작이 바뀜): 재승인 200 DONE 은 `success`(앱의 DB 조건부 UPDATE 로 이중 반영 방지), 부분 취소는 취소 직전 조회한 누계를 `alreadyCanceledTotal` 로 전달, `uncertain`/`processing` 은 FAILED 확정 금지.
