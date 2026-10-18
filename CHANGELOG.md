@@ -1,8 +1,8 @@
 # CHANGELOG
 
-`@platform/shared/payments` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
+`@platform/shared/payments`·`@platform/shared/secrets` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
-## secrets 서브패스 (신규, 미배포 — 번호·태그는 앱 전환 직전 결정)
+## v0.3.0-rc.2 — secrets 서브패스 (신규; 태그는 사장님 승인 후 생성)
 
 `@platform/shared/secrets` 추가(payments 와 별개, 기존 API 변경 없음). 설계 `docs/tenant-secrets-envelope-design.md`.
 - 봉투 `ENC:v2:<kid>:<base64url(iv‖태그‖암호문)>`, AES-256-GCM, AAD = 테넌트 id(소문자)+provider. 쓰기는 항상 v2·현재 키.
@@ -11,11 +11,11 @@
 - `resolveSecret`/`readFailed`/`jsonSecret`: ok/absent/unavailable 3상태.
 - 오류는 코드 문자열만(`SECRET_*`), 키링은 키 바이트를 노출하지 않음. 서버 전용(`node:crypto`).
 
-## Unreleased (다음 rc 예정 — 번호 미정, 아직 태그·병합 없음)
+## v0.3.0-rc.2 — payments (태그는 사장님 승인 후 생성, main 병합 없음)
 
 기준: v0.3.0-rc.1(`0db3db3`) 대비. 두 소비 앱은 아직 `#v0.2.2`(payments 없음)에 고정이라 **지금 깨지는 곳은 없고, 핀을 올릴 때부터 적용**된다.
 
-> **버전 메모**: v0.3.0-rc.1 이 이미 공개 태그인데 이 변경에서 breaking 이 다시 들어간다(rc 는 안정 API 약속 없음, 소비 앱은 아직 `#v0.2.2`). 다음 버전 번호(`0.3.0-rc.2` vs `0.4.0-rc.1`)는 공개 push·태그 시점에 저장소 관리자가 결정하고 그때 "Unreleased" 를 확정 번호로 바꾼다.
+> **버전 메모**: v0.3.0-rc.1 이 이미 공개 태그인데 이 변경에서 breaking 이 다시 들어간다(rc 는 안정 API 약속 없음, 소비 앱은 아직 `#v0.2.2`). 다음 버전은 **`0.3.0-rc.2`** 로 결정됨(사장님). 태그 생성·공개 push 는 사장님이 platform 세션에서 직접 승인한 뒤에만 한다.
 
 ### BREAKING (타입·분기 영향)
 - `TossConfig.expectedMode` **필수**(`"test" | "live" | "unchecked"`). 생략하면 `KEY_MODE_REQUIRED` 를 던진다. 접두사(`test_sk_`·`live_sk_`, 위젯 `gsk`)와 다르면 `KEY_MODE_MISMATCH`. `"unchecked"` 는 토스 도메인이 아닌 `baseUrl`(모의 서버)에서만 허용(아니면 `KEY_MODE_UNCHECKED_FORBIDDEN`).
@@ -48,4 +48,4 @@
 - `TossPayment` 선택 필드: `currency`·`taxFreeAmount`·`suppliedAmount`·`vat`·`secret`·`virtualAccount`.
 
 ### 참고
-- 위 변경은 `feat/toss-confirm-classify` 브랜치에만 올라가 있고 main 병합·태그(rc.2 등)는 아직 없다. 태그·병합 시점은 앱 전환 직전(스테이징 반영 → 테스트 키 실호출 시험 → 태그).
+- 위 변경은 `feat/toss-confirm-classify` 브랜치에만 올라가 있고 main 병합·`v0.3.0-rc.2` 태그는 아직 없다(태그는 사장님 직접 승인 후). 소비 앱이 이 태그로 핀을 올릴 때 위 BREAKING·전환 지점(`docs/payments-api-draft.md` §9)을 적용한다.

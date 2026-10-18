@@ -205,4 +205,4 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 
 ## 11. 버전 메모
 - v0.3.0-rc.1(`0db3db3`)은 이미 공개 태그다. 이번 변경(CHANGELOG.md 의 BREAKING 포함)은 같은 `0.3.0` 계열의 **다음 rc 에서 breaking 이 다시 들어가는** 것이다(rc 는 안정 API 를 약속하지 않는 사전 배포라는 전제). 두 앱은 `#v0.2.2` 고정이라 rc.1 을 쓰는 곳은 없다.
-- 다음 버전 번호(`0.3.0-rc.2` 로 이어갈지, breaking 이 크므로 `0.4.0-rc.1` 로 올릴지)는 공개 push·태그 시점에 저장소 관리자가 결정한다. 이 문서·CHANGELOG 의 "Unreleased" 표기는 그때 확정 번호로 바꾼다.
+- 다음 버전은 **`0.3.0-rc.2`** 로 결정됨(사장님, 2026-10-18; `0.4.0-rc.1` 안은 채택하지 않음). 태그 생성·공개 push 는 사장님이 직접 승인한 뒤에만 한다. CHANGELOG 의 표기는 이미 `v0.3.0-rc.2` 로 바꿨다.
