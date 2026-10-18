@@ -8,7 +8,8 @@
     "./push/fcm": "./src/push/fcm.ts",
     "./push/native": "./src/push/native.ts",
     "./account": "./src/account/index.ts",
-    "./payments": "./src/payments/index.ts"
+    "./payments": "./src/payments/index.ts",
+    "./secrets": "./src/secrets/index.ts"
   },
   "files": ["src"],
   "scripts": {

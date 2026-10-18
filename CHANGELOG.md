@@ -2,6 +2,15 @@
 
 `@platform/shared/payments` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
+## secrets 서브패스 (신규, 미배포 — 번호·태그는 앱 전환 직전 결정)
+
+`@platform/shared/secrets` 추가(payments 와 별개, 기존 API 변경 없음). 설계 `docs/tenant-secrets-envelope-design.md`.
+- 봉투 `ENC:v2:<kid>:<base64url(iv‖태그‖암호문)>`, AES-256-GCM, AAD = 테넌트 id(소문자)+provider. 쓰기는 항상 v2·현재 키.
+- 키 로더 `loadKeyring(env, { current?, previous? })`: hex 64자·base64/base64url 32바이트, 현재 키+`<이름>_PREVIOUS`(쉼표 다수) 로테이션, kid = 키 SHA-256 앞 4바이트.
+- 읽기 전용 레거시: 접두 `ENC:v1:`(AAD=테넌트 id 문자열), 접두 없는 `iv.태그.암호문`(AAD 없음) → `needsRewrite: true`.
+- `resolveSecret`/`readFailed`/`jsonSecret`: ok/absent/unavailable 3상태.
+- 오류는 코드 문자열만(`SECRET_*`), 키링은 키 바이트를 노출하지 않음. 서버 전용(`node:crypto`).
+
 ## Unreleased (다음 rc 예정 — 번호 미정, 아직 태그·병합 없음)
 
 기준: v0.3.0-rc.1(`0db3db3`) 대비. 두 소비 앱은 아직 `#v0.2.2`(payments 없음)에 고정이라 **지금 깨지는 곳은 없고, 핀을 올릴 때부터 적용**된다.

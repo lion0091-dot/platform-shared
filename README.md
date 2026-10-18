@@ -8,6 +8,8 @@
 
 - `@platform/shared/account` — account(회계 장부) 연동의 순수 계산: `buildSignedCall`(정지·해제·접근 모드·보류 읽기·대표 이전 호출의 본문+서명), `signSsoToken`(SSO 토큰), `classifyAccountResponse`(응답 → 성공/재시도/멈춤). 약속은 account 저장소 `docs/contract/integration-contract.md`, 시험 벡터는 `src/account/__vectors__/`(account 것의 복사본 — 약속이 바뀌면 다시 복사). DB·큐·네트워크 전송은 들어 있지 않다(각 앱이 한다).
 
+- `@platform/shared/secrets` — 테넌트별 비밀(결제 키·알림 자격정보 등)을 DB 에 넣기 전에 앱 서버에서 암호화하는 공용 봉투(AES-256-GCM). `sealSecret`/`openSecret`(`ENC:v2:<kid>:…`, AAD=테넌트 id+종류), `loadKeyring`(현재 키+이전 키 로테이션, hex 64자·base64 모두 허용), 기존 두 형식의 읽기 전용 레거시 지원, `resolveSecret`(ok/absent/unavailable 3상태). **서버 전용**(`node:crypto`), 키·평문은 오류·로그에 나오지 않는다. 설계: `docs/tenant-secrets-envelope-design.md`. 시험 벡터는 가짜 키만(`src/secrets/__vectors__/`).
+
 ## 쓰는 법(앱 쪽)
 1. `package.json`: `"@platform/shared": "github:lion0091-dot/platform-shared#v0.1.0"` (버전은 태그로 고정, 올릴 때 두 앱을 같이 올린다).
 2. `next.config`: `transpilePackages: ["@platform/shared"]`.
