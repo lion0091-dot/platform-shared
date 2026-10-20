@@ -9,7 +9,8 @@
     "./push/native": "./src/push/native.ts",
     "./account": "./src/account/index.ts",
     "./payments": "./src/payments/index.ts",
-    "./secrets": "./src/secrets/index.ts"
+    "./secrets": "./src/secrets/index.ts",
+    "./inapp": "./src/inapp/index.ts"
   },
   "files": ["src"],
   "scripts": {

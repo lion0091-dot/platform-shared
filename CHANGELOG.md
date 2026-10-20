@@ -2,6 +2,14 @@
 
 `@platform/shared/payments`·`@platform/shared/secrets` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
+## 미정(태그 후보 v0.3.0-rc.3, 개발자 승인 후 결정) — inapp 서브패스 (신규)
+
+`@platform/shared/inapp` 추가(기존 API 변경 없음). 카카오톡 인앱 브라우저 처리 중 두 소비 앱이 각자 갖고 있던 순수 로직만 공용화.
+- `isKakaoInApp(userAgent)`: UA 에 `kakaotalk`(대소문자 무관)가 있으면 참, null·undefined·빈 문자열은 거짓.
+- `kakaoExternalOpenUrl(pageUrl)`: `kakaotalk://web/openExternal?url=<encodeURIComponent(pageUrl)>`.
+- `matchesPathPrefixes(pathname, prefixes)`: 정확 일치 또는 `접두어/` 로 시작하면 참(`/shopping` 은 `/shop` 에 안 걸림), null 거짓. 경로 목록은 앱이 넘긴다.
+- 안내 화면(React)·쿠키·로그인·앱별 경로 목록은 공용에 없다. 정규식 규칙(예: `/o/<코드>` 처럼 코드 세그먼트 필수)이 필요한 앱은 접두어 판정 대신 자기 정규식을 유지한다.
+
 ## v0.3.0-rc.2 — secrets 서브패스 (신규; 태그는 사장님 승인 후 생성)
 
 `@platform/shared/secrets` 추가(payments 와 별개, 기존 API 변경 없음). 설계 `docs/tenant-secrets-envelope-design.md`.
