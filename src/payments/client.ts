@@ -1,10 +1,14 @@
 import { classifyTossError } from "./classify";
-import { assertIdempotencyKey, confirmIdempotencyKey } from "./idempotency";
+import { assertIdempotencyKey, cancelIdempotencyKey, confirmIdempotencyKey } from "./idempotency";
+import { assertKeyMode } from "./keyMode";
 import { assertOrderId } from "./orderId";
-import type { CancelInput,CancelOutcome, ConfirmInput, ConfirmOutcome, LookupOutcome, TossCancel, TossConfig, TossPayment } from "./types";
+import { canceledTotal, isDoneCancel, isFullyCanceled } from "./status";
+import type { CancelInput, CancelOutcome, PartialCancelCheck, ConfirmInput, ConfirmOutcome, LookupOutcome, TossCancel, TossConfig, TossPayment, TossVirtualAccount } from "./types";
 
 const BASE_URL = "https://api.tosspayments.com";
 export const TOSS_TIMEOUT_MS = 15_000;
+/** 호출 제한 시간 상한. 이보다 크면(Infinity·2^31 이상 포함, setTimeout 오버플로 시 즉시 중단되는 문제 방지) 이 값으로 줄인다. */
+export const TOSS_TIMEOUT_MAX_MS = 120_000;
 
 type Raw =
   | { ok: true; body: Record<string, unknown> }
@@ -16,10 +20,38 @@ export function basicAuthHeader(secretKey: string): string {
   return `Basic ${btoa(`${secretKey}:`)}`;
 }
 
+/** "unchecked" 는 토스 도메인이 아닌 baseUrl(모의 서버)에서만 허용한다 — 실제 토스(live 키 포함)에 검사 없이 나가는 것을 막는다. */
+function assertUncheckedAllowed(baseUrl: string | undefined): void {
+  let host = "";
+
+  try {
+    host = baseUrl ? new URL(baseUrl).hostname.toLowerCase() : "";
+  } catch {
+    host = "";
+  }
+
+  if (!host || host === "tosspayments.com" || host.endsWith(".tosspayments.com")) {
+    throw new Error("KEY_MODE_UNCHECKED_FORBIDDEN: expectedMode \"unchecked\" 는 토스 도메인이 아닌 baseUrl(모의 서버)에서만 쓸 수 있다. 실제 토스에는 \"test\"|\"live\" 를 지정한다.");
+  }
+}
+
+/** paymentKey: 비어 있지 않은 보이는 ASCII 200자 이하(빈 값이면 URL 이 다른 엔드포인트가 된다) */
+function assertPaymentKey(paymentKey: string): string {
+  if (typeof paymentKey !== "string" || !/^[!-~]{1,200}$/.test(paymentKey)) throw new Error("INVALID_PAYMENT_KEY: paymentKey 는 1~200자의 보이는 ASCII 여야 한다.");
+
+  return paymentKey;
+}
+
 async function call(cfg: TossConfig, method: "GET" | "POST", path: string, opts: { body?: unknown; idempotencyKey?: string } = {}): Promise<Raw> {
+  if (!cfg.expectedMode) throw new Error("KEY_MODE_REQUIRED: expectedMode(\"test\"|\"live\") 를 지정해야 한다. 접두사 없는 모의 키는 \"unchecked\".");
+  if (cfg.expectedMode === "unchecked") assertUncheckedAllowed(cfg.baseUrl);
+  else assertKeyMode(cfg.secretKey, cfg.expectedMode);
+
+  const timeoutMs = typeof cfg.timeoutMs === "number" && Number.isFinite(cfg.timeoutMs) && cfg.timeoutMs > 0 ? Math.min(cfg.timeoutMs, TOSS_TIMEOUT_MAX_MS) : TOSS_TIMEOUT_MS;
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs ?? TOSS_TIMEOUT_MS);
-  const headers: Record<string, string> = { Authorization: basicAuthHeader(cfg.secretKey) };
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  // 환경변수에 섞여 들어온 앞뒤 공백·개행은 지우고 보낸다(키 검사와 같은 기준)
+  const headers: Record<string, string> = { Authorization: basicAuthHeader(cfg.secretKey.trim()) };
 
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
   if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
@@ -77,7 +109,26 @@ function toPayment(b: Record<string, unknown>): TossPayment | null {
         }))
     : [];
 
-  return {
+  const num = (v: unknown) => (typeof v === "number" ? v : null);
+  const va = b.virtualAccount && typeof b.virtualAccount === "object" ? (b.virtualAccount as Record<string, unknown>) : null;
+  const virtualAccount: TossVirtualAccount | null =
+    va && typeof va.accountNumber === "string" && typeof va.bankCode === "string"
+      ? {
+          accountNumber: va.accountNumber,
+          bankCode: va.bankCode,
+          customerName: typeof va.customerName === "string" ? va.customerName : null,
+          dueDate: typeof va.dueDate === "string" ? va.dueDate : null,
+          refundStatus: typeof va.refundStatus === "string" ? va.refundStatus : null,
+          expired: typeof va.expired === "boolean" ? va.expired : null,
+        }
+      : null;
+
+  const payment: TossPayment = {
+    currency: typeof b.currency === "string" ? b.currency : null,
+    taxFreeAmount: num(b.taxFreeAmount),
+    suppliedAmount: num(b.suppliedAmount),
+    vat: num(b.vat),
+    virtualAccount,
     paymentKey: b.paymentKey,
     orderId: b.orderId,
     status: b.status,
@@ -87,6 +138,11 @@ function toPayment(b: Record<string, unknown>): TossPayment | null {
     balanceAmount: typeof b.balanceAmount === "number" ? b.balanceAmount : null,
     cancels,
   };
+
+  // secret 은 열거되지 않게 둔다: 결과 객체를 로그·JSON 으로 찍거나 {...payment} 로 복사해도 새지 않는다. payment.secret 으로는 읽힌다(웹훅 대조용).
+  Object.defineProperty(payment, "secret", { value: typeof b.secret === "string" ? b.secret : null, enumerable: false, writable: false, configurable: false });
+
+  return payment;
 }
 
 /** 결제 승인 POST /v1/payments/confirm. 한 번만 호출한다(내부 재시도 없음). 불확실하면 uncertain/processing 을 돌려주니 앱이 조회·재호출한다. */
@@ -96,6 +152,11 @@ export async function confirmPayment(cfg: TossConfig, input: ConfirmInput): Prom
   if (!Number.isSafeInteger(input.amount) || input.amount <= 0) throw new Error("INVALID_AMOUNT: 기대 금액은 양의 정수(원)여야 한다.");
 
   assertOrderId(input.orderId);
+  assertPaymentKey(input.paymentKey);
+
+  if (input.expectedTaxFreeAmount !== undefined && (!Number.isSafeInteger(input.expectedTaxFreeAmount) || input.expectedTaxFreeAmount < 0 || input.expectedTaxFreeAmount > input.amount)) {
+    throw new Error("INVALID_TAX_FREE: 기대 면세 금액은 0 이상 기대 금액 이하의 정수(원)여야 한다.");
+  }
 
   const r = await call(cfg, "POST", "/v1/payments/confirm", {
     idempotencyKey: key,
@@ -113,7 +174,7 @@ export async function confirmPayment(cfg: TossConfig, input: ConfirmInput): Prom
       case "processing":
         return { kind: "processing", code: r.code };
       case "session_expired":
-        return { kind: "session_expired", code: r.code };
+        return { kind: "session_expired", code: r.code, message: r.message };
       case "uncertain":
       case "retry_later":
         return { kind: "uncertain", code: r.code, message: r.message };
@@ -125,10 +186,20 @@ export async function confirmPayment(cfg: TossConfig, input: ConfirmInput): Prom
   const p = toPayment(r.body);
 
   if (!p) return { kind: "uncertain", code: "BAD_RESPONSE", message: "승인 응답 형식이 올바르지 않습니다." };
+  // 가상계좌 발급: 같은 주문·금액이면 정상적인 입금 대기(승인 완료 아님)
+  if (p.status === "WAITING_FOR_DEPOSIT" && p.orderId === input.orderId && p.paymentKey === input.paymentKey && p.totalAmount === input.amount) return { kind: "waiting_for_deposit", payment: p };
   // 상태를 먼저: DONE 이 아니면(IN_PROGRESS 등) 승인됐다고 단정할 수 없으니 불일치로 보지 않고 불확실(조회로 확정)
   if (p.status !== "DONE") return { kind: "uncertain", code: `STATUS_${p.status}`, message: "승인 응답의 상태가 DONE 이 아닙니다." };
   if (p.orderId !== input.orderId || p.paymentKey !== input.paymentKey) return { kind: "approved_mismatch", reason: "ORDER_MISMATCH", payment: p };
   if (p.totalAmount !== input.amount) return { kind: "approved_mismatch", reason: "AMOUNT_MISMATCH", payment: p };
+  // 통화가 KRW 가 아니면 금액이 같아 보여도 같은 값이 아니다(응답에 통화가 없으면 KRW 로 본다). 토스에선 승인된 상태 → 취소 연계 대상
+  if (p.currency && p.currency !== "KRW") return { kind: "approved_mismatch", reason: "CURRENCY_MISMATCH", payment: p };
+
+  // 면세 금액: 결제창(클라이언트)이 정한 값이라 신뢰할 수 없다. 면세·복합과세 상점은 서버가 DB 에서 계산한 면세 금액을 넘겨 토스에 기록된 값과 대조한다.
+  if (input.expectedTaxFreeAmount !== undefined) {
+    if (typeof p.taxFreeAmount !== "number") return { kind: "uncertain", code: "TAX_FREE_UNVERIFIED", message: "승인 응답에 면세 금액이 없어 대조하지 못했습니다. 조회로 확인하세요." };
+    if (p.taxFreeAmount !== input.expectedTaxFreeAmount) return { kind: "approved_mismatch", reason: "TAX_FREE_MISMATCH", payment: p };
+  }
 
   return { kind: "success", payment: p };
 }
@@ -159,8 +230,8 @@ export async function getPaymentByOrderId(cfg: TossConfig, orderId: string): Pro
 }
 
 /** paymentKey 로 조회 GET /v1/payments/{paymentKey} */
-export function getPayment(cfg: TossConfig, paymentKey: string): Promise<LookupOutcome> {
-  return lookup(cfg, `/v1/payments/${encodeURIComponent(paymentKey)}`);
+export async function getPayment(cfg: TossConfig, paymentKey: string): Promise<LookupOutcome> {
+  return lookup(cfg, `/v1/payments/${encodeURIComponent(assertPaymentKey(paymentKey))}`);
 }
 
 /** 앱이 게이트웨이처럼 쓰기 위한 묶음(설정을 한 번만 넘긴다). lookupByOrderId 포함. */
@@ -170,13 +241,36 @@ export function createTossClient(cfg: TossConfig) {
     lookupByOrderId: (orderId: string) => getPaymentByOrderId(cfg, orderId),
     lookup: (paymentKey: string) => getPayment(cfg, paymentKey),
     cancel: (input: CancelInput) => cancelPayment(cfg, input),
+    cancelApprovedMismatch: (outcome: Extract<ConfirmOutcome, { kind: "approved_mismatch" }>) => cancelApprovedMismatch(cfg, outcome),
   };
 }
 
 /** 결제 취소 POST /v1/payments/{paymentKey}/cancel. ALREADY_CANCELED/ALREADY_REFUND 는 paymentKey 조회로 CANCELED 를 확인하면 canceled(alreadyCanceled) 로 돌려준다. */
 export async function cancelPayment(cfg: TossConfig, input: CancelInput): Promise<CancelOutcome> {
   const key = assertIdempotencyKey(input.idempotencyKey);
-  const body: Record<string, unknown> = { cancelReason: input.cancelReason.slice(0, 200) };
+
+  assertPaymentKey(input.paymentKey);
+
+  if (typeof input.cancelReason !== "string" || input.cancelReason.trim().length === 0) throw new Error("INVALID_CANCEL_REASON: 취소 사유는 비어 있을 수 없다.");
+
+  const body: Record<string, unknown> = { cancelReason: [...input.cancelReason].slice(0, 200).join("") };
+
+  if (input.taxFreeAmount !== undefined) {
+    if (input.cancelAmount === undefined) throw new Error("INVALID_TAX_FREE: 면세 금액은 부분 취소(cancelAmount 지정)에만 쓴다.");
+    if (!Number.isSafeInteger(input.taxFreeAmount) || input.taxFreeAmount < 0 || input.taxFreeAmount > input.cancelAmount) throw new Error("INVALID_TAX_FREE: 면세 금액은 0 이상 취소 금액 이하의 정수(원)여야 한다.");
+
+    body.taxFreeAmount = input.taxFreeAmount;
+  }
+
+  const acct = input.refundReceiveAccount;
+
+  if (acct) {
+    if (typeof acct.bank !== "string" || acct.bank.length === 0 || !/^\d{1,20}$/.test(acct.accountNumber ?? "") || typeof acct.holderName !== "string" || acct.holderName.length === 0 || acct.holderName.length > 60) {
+      throw new Error("INVALID_REFUND_ACCOUNT: 은행 코드, 숫자만 20자 이하 계좌번호, 60자 이하 예금주가 필요하다.");
+    }
+
+    body.refundReceiveAccount = { bank: acct.bank, accountNumber: acct.accountNumber, holderName: acct.holderName };
+  }
 
   if (input.cancelAmount !== undefined) {
     if (!Number.isSafeInteger(input.cancelAmount) || input.cancelAmount <= 0) throw new Error("INVALID_AMOUNT: 취소 금액은 양의 정수(원)여야 한다.");
@@ -195,12 +289,45 @@ export async function cancelPayment(cfg: TossConfig, input: CancelInput): Promis
 
     const c = classifyTossError("cancel", r.status, r.code);
 
+    // NOT_CANCELABLE_AMOUNT: 첫 취소 응답을 잃은 뒤 (다른 키로) 다시 취소하면 이미 취소된 금액이라 이 코드가 온다. "사람 처리"로 넘기기 전에 조회로 이미 반영됐는지 확인한다.
+    if (c === "not_cancelable" && r.code === "NOT_CANCELABLE_AMOUNT") {
+      const done = await findAppliedCancel(cfg, input);
+
+      if (done) return { kind: "canceled", payment: done, alreadyCanceled: true };
+    }
+
     if (c === "already_canceled") {
       const l = await getPayment(cfg, input.paymentKey);
 
-      return l.kind === "found" && l.payment.status === "CANCELED"
-        ? { kind: "canceled", payment: l.payment, alreadyCanceled: true }
-        : { kind: "uncertain", code: r.code, message: "이미 취소됐다는 응답이지만 조회로 CANCELED 를 확인하지 못했습니다." };
+      if (l.kind === "found" && input.cancelAmount === undefined) {
+        // 전액 요청: 이미 완전히 취소돼 있다
+        if (isFullyCanceled(l.payment)) return { kind: "canceled", payment: l.payment, alreadyCanceled: true };
+      } else if (l.kind === "found") {
+        // 부분 요청에 대한 ALREADY_CANCELED: "이미 취소된 결제"는 이번 부분 취소가 아니라 결제 전체의 상태다. 이번 요청의 효과인지 누계로 구분한다.
+        const cur = canceledTotal(l.payment);
+
+        if (cur !== null && cur === input.alreadyCanceledTotal! + input.cancelAmount!) {
+          if (ownsPartialCancel(l.payment, input)) return { kind: "canceled", payment: l.payment, alreadyCanceled: true };
+
+          return { kind: "not_cancelable", code: r.code, message: NOT_OWNED_MSG };
+        }
+
+        if (isFullyCanceled(l.payment)) {
+          return { kind: "not_cancelable", code: r.code, message: "결제가 이미 전액 취소되어 이번 부분 취소가 적용됐는지 알 수 없습니다. 취소 이력(cancels)을 확인해 사람이 처리하세요." };
+        }
+
+        // 일부만 취소된 상태에서 누계가 기대와 다르다(다른 경로가 먼저/같이 취소): 같은 키 재시도로는 풀리지 않는다 → 현재 누계를 알려 새 키로 다시 계산하게 한다.
+        if (cur !== null) {
+          return {
+            kind: "uncertain",
+            code: cur === input.alreadyCanceledTotal ? "CANCEL_NOT_APPLIED" : "CANCEL_TOTAL_MISMATCH",
+            message: "이미 취소됐다는 응답이지만 이번 부분 취소가 적용되지 않았습니다. currentCanceledTotal 을 alreadyCanceledTotal 로 새 키를 만들어 다시 계산하세요.",
+            currentCanceledTotal: cur,
+          };
+        }
+      }
+
+      return { kind: "uncertain", code: r.code, message: "이미 취소됐다는 응답이지만 조회로 취소 완료를 확인하지 못했습니다." };
     }
 
     switch (c) {
@@ -221,19 +348,92 @@ export async function cancelPayment(cfg: TossConfig, input: CancelInput): Promis
 
   if (p && p.paymentKey === input.paymentKey && (p.status === "CANCELED" || p.status === "PARTIAL_CANCELED")) {
     if (input.cancelAmount === undefined) {
-      if (p.status === "CANCELED") return { kind: "canceled", payment: p, alreadyCanceled: false };
+      // 전액 요청: CANCELED, 또는 잔액 0 인 PARTIAL_CANCELED(토스는 부분 취소로 0 이 된 경우 이 상태로 남김)
+      if (isFullyCanceled(p)) return { kind: "canceled", payment: p, alreadyCanceled: false };
     } else {
       // 부분 취소: 같은 키 재사용으로 토스가 첫 응답을 그대로 돌려준 경우(실제 환불 없음)를 걸러낸다 — 취소 누계가 이번 금액만큼 늘었어야 한다.
       const expected = input.alreadyCanceledTotal! + input.cancelAmount;
-      const sum = p.cancels.reduce((s, c) => s + c.cancelAmount, 0);
+      const sum = p.cancels.filter(isDoneCancel).reduce((s, c) => s + c.cancelAmount, 0); // DONE 이 아닌 취소 항목(진행 중·실패)은 합계에서 제외
       const byBalance = p.balanceAmount === null ? null : p.totalAmount - p.balanceAmount;
       const ok = (p.cancels.length > 0 || byBalance !== null) && (p.cancels.length === 0 || sum === expected) && (byBalance === null || byBalance === expected);
 
       if (ok) return { kind: "canceled", payment: p, alreadyCanceled: false };
 
-      return { kind: "uncertain", code: "CANCEL_NOT_APPLIED", message: "취소 응답의 취소 누계가 요청 금액만큼 늘지 않았습니다(같은 키의 이전 응답일 수 있음). 조회로 확인하세요." };
+      // 누계가 기대와 다르다: 호출자의 alreadyCanceledTotal 이 낡았거나 같은 키의 이전 응답이다. 조회로 현재 누계를 확인해 알려준다.
+      const chk = await checkPartialCancel(cfg, input);
+
+      if (chk.kind === "applied") return { kind: "canceled", payment: chk.payment, alreadyCanceled: false };
+      if (chk.kind === "unknown") return { kind: "uncertain", code: "CANCEL_NOT_APPLIED", message: `취소 응답의 취소 누계가 요청 금액만큼 늘지 않았고 조회로 확인하지 못했습니다(${chk.code}).` };
+
+      return {
+        kind: "uncertain",
+        code: chk.kind === "not_applied" ? "CANCEL_NOT_APPLIED" : "CANCEL_TOTAL_MISMATCH",
+        message: "취소 응답의 취소 누계가 요청 금액만큼 늘지 않았습니다. currentCanceledTotal 을 alreadyCanceledTotal 로 새 키를 만들어 다시 계산하세요.",
+        currentCanceledTotal: chk.currentCanceledTotal,
+      };
     }
   }
 
   return { kind: "uncertain", code: "BAD_RESPONSE", message: "취소 응답의 상태를 확인하지 못했습니다." };
+}
+
+/**
+ * confirm 이 approved_mismatch(토스에선 승인됨)를 돌려준 결제를 전액 취소한다. 표준 취소 키(cancelIdempotencyKey 전액)를 써서 다른 경로의 취소와 한 번만 처리되게 한다.
+ * 호출 여부(자동/사람 확인 후)는 앱이 정한다 — 이 함수는 호출 방법만 통일한다. 결과 kind 는 cancelPayment 와 같다.
+ */
+export function cancelApprovedMismatch(cfg: TossConfig, outcome: Extract<ConfirmOutcome, { kind: "approved_mismatch" }>, idempotencyKey?: string): Promise<CancelOutcome> {
+  return cancelPayment(cfg, {
+    paymentKey: outcome.payment.paymentKey,
+    cancelReason: `주문·금액 불일치 승인 취소(${outcome.reason})`,
+    idempotencyKey: idempotencyKey ?? cancelIdempotencyKey({ paymentKey: outcome.payment.paymentKey }),
+  });
+}
+
+/**
+ * 부분 취소가 실제로 적용됐는지 토스 조회(getPayment)로 확인한다. 응답 유실·CANCEL_*·낡은 alreadyCanceledTotal 뒤에 같은 키를 되풀이하는 대신 쓴다.
+ * input 은 취소 요청과 같은 값(paymentKey·cancelAmount·alreadyCanceledTotal)이면 된다.
+ */
+export async function checkPartialCancel(cfg: TossConfig, input: Pick<CancelInput, "paymentKey" | "cancelAmount" | "alreadyCanceledTotal">): Promise<PartialCancelCheck> {
+  const before = input.alreadyCanceledTotal;
+
+  if (input.cancelAmount === undefined || !Number.isSafeInteger(input.cancelAmount) || input.cancelAmount <= 0 || typeof before !== "number" || !Number.isSafeInteger(before) || before < 0) {
+    throw new Error("INVALID_CANCELED_TOTAL: cancelAmount(양의 정수)와 alreadyCanceledTotal(0 이상 정수)이 필요하다.");
+  }
+
+  const l = await getPayment(cfg, input.paymentKey);
+
+  if (l.kind !== "found") return { kind: "unknown", code: "code" in l ? l.code : "LOOKUP_FAILED", message: "message" in l ? l.message : "조회로 확인하지 못했습니다." };
+
+  const cur = canceledTotal(l.payment);
+
+  if (cur === null) return { kind: "unknown", code: "NO_CANCEL_DATA", message: "조회 응답에서 취소 누계를 알 수 없습니다." };
+  if (cur === before + input.cancelAmount) return { kind: "applied", payment: l.payment, currentCanceledTotal: cur };
+
+  return { kind: cur === before ? "not_applied" : "diverged", payment: l.payment, currentCanceledTotal: cur };
+}
+
+/** 이 취소 요청이 이미 토스에 반영돼 있으면 그 결제를 돌려준다(전액: 완전 취소 상태, 부분: 현재 누계 === 요청 전 누계 + 금액). 조회 실패·불명이면 null. */
+async function findAppliedCancel(cfg: TossConfig, input: CancelInput): Promise<TossPayment | null> {
+  if (input.cancelAmount === undefined) {
+    const l = await getPayment(cfg, input.paymentKey);
+
+    return l.kind === "found" && isFullyCanceled(l.payment) ? l.payment : null;
+  }
+
+  const chk = await checkPartialCancel(cfg, input);
+
+  // 누계가 맞아도 취소 이력에 이 요청의 몫(같은 금액·같은 사유)이 없으면 다른 경로가 방금 같은 금액을 취소한 것일 수 있어 "이미 반영"으로 보지 않는다.
+  return chk.kind === "applied" && ownsPartialCancel(chk.payment, input) ? chk.payment : null;
+}
+
+const NOT_OWNED_MSG = "취소 누계는 맞지만 취소 이력에서 이 요청의 몫(같은 금액·같은 사유)을 찾지 못했습니다. 다른 경로가 같은 금액을 취소했을 수 있으니 cancels 를 확인해 사람이 처리하세요.";
+
+/**
+ * 부분 취소가 이 요청의 몫인지(best-effort): 취소 이력에 같은 금액·같은 사유(전송한 그대로, 200자 절단 후)의 항목이 있어야 한다.
+ * 한계: 다른 경로가 **같은 금액·같은 사유**로 취소했다면 구분하지 못한다 → 취소 사유에 요청마다 다른 값(취소 요청 ID 등)을 넣는 것을 권장한다.
+ */
+function ownsPartialCancel(p: TossPayment, input: CancelInput): boolean {
+  const reason = [...input.cancelReason].slice(0, 200).join("");
+
+  return p.cancels.some((c) => isDoneCancel(c) && c.cancelAmount === input.cancelAmount && c.cancelReason === reason);
 }

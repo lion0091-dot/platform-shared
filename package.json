@@ -1,6 +1,6 @@
 {
   "name": "@platform/shared",
-  "version": "0.3.0-rc.1",
+  "version": "0.3.0-rc.2",
   "private": true,
   "description": "플랫폼 공용 코드(wholesale·shipping-prj 등). 소스(.ts)를 그대로 배포하고 쓰는 앱이 빌드한다(Next transpilePackages).",
   "type": "module",
@@ -8,7 +8,8 @@
     "./push/fcm": "./src/push/fcm.ts",
     "./push/native": "./src/push/native.ts",
     "./account": "./src/account/index.ts",
-    "./payments": "./src/payments/index.ts"
+    "./payments": "./src/payments/index.ts",
+    "./secrets": "./src/secrets/index.ts"
   },
   "files": ["src"],
   "scripts": {

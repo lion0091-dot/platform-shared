@@ -1,3 +1,4 @@
+import { isFullyCanceled } from "./status";
 import type { FailUrlKind, PaymentInterpretation, TossPayment } from "./types";
 
 export type Op = "confirm" | "lookup" | "cancel";
@@ -37,6 +38,45 @@ export const DEFINITE_FAILURE: ReadonlySet<string> = new Set([
   "INVALID_CARD_NUMBER",
   "INVALID_CARD_INSTALLMENT_PLAN",
   "NOT_SUPPORTED_INSTALLMENT_PLAN_CARD_OR_MERCHANT",
+  // 결제 승인 섹션(공식 에러 코드 페이지 2026-10-16 열람, 400): 할부 개월 초과·할부 미지원 카드
+  "EXCEED_MAX_CARD_INSTALLMENT_PLAN",
+  "NOT_SUPPORTED_MONTHLY_INSTALLMENT_PLAN",
+  // 결제 승인 섹션(공식 에러 코드 페이지 2026-10-17 열람): 한도·횟수·시간대·인증·계정 계열 거절
+  "EXCEED_MAX_DAILY_PAYMENT_COUNT",
+  "EXCEED_MAX_PAYMENT_AMOUNT",
+  "EXCEED_MAX_ONE_DAY_WITHDRAW_AMOUNT",
+  "EXCEED_MAX_ONE_TIME_WITHDRAW_AMOUNT",
+  "EXCEED_MAX_AMOUNT",
+  "EXCEED_MAX_MONTHLY_PAYMENT_AMOUNT",
+  "EXCEED_MAX_AUTH_COUNT",
+  "EXCEED_MAX_ONE_DAY_AMOUNT",
+  "NOT_ALLOWED_POINT_USE",
+  "BELOW_MINIMUM_AMOUNT",
+  "NOT_FOUND_TERMINAL_ID",
+  "INVALID_AUTHORIZE_AUTH",
+  "RESTRICTED_TRANSFER_ACCOUNT",
+  "INVALID_UNREGISTERED_SUBMALL",
+  "NOT_REGISTERED_BUSINESS",
+  "INVALID_ACCOUNT_INFO_RE_REGISTER",
+  "NOT_AVAILABLE_PAYMENT",
+  "NOT_AVAILABLE_BANK",
+  "INVALID_PASSWORD",
+  "INCORRECT_BASIC_AUTH_FORMAT",
+]);
+// FDS_ERROR(403)는 일부러 뺐다 → 불확실: 위험거래 감지 후 문자 링크로 본인 인증을 하면 결제가 가능하다는 안내가 토스 에러 코드 페이지에 있어(https://docs.tosspayments.com/reference/error-codes, 2026-10-17 열람), 응답 뒤에 승인이 이어질 수 있다. 조회로 확정한다.
+
+/** 취소 섹션: 같은 요청을 되풀이해도 소용없어 사람이 처리해야 하는 코드(NOT_CANCELABLE_* 외) */
+const NOT_CANCELABLE_EXTRA = new Set([
+  "EXCEED_CANCEL_LIMIT",
+  "REFUND_REJECTED",
+  "NOT_ALLOWED_PARTIAL_REFUND",
+  "NOT_ALLOWED_PARTIAL_REFUND_WAITING_DEPOSIT",
+  "EXCEED_CANCEL_AMOUNT_DISCOUNT_AMOUNT",
+  "FORBIDDEN_BANK_REFUND_REQUEST",
+  "FAILED_CLOSED_ACCOUNT_REFUND",
+  "INVALID_REFUND_ACCOUNT_INFO",
+  "INVALID_REFUND_ACCOUNT_NUMBER",
+  "INVALID_BANK",
 ]);
 
 /** 토스 오류(HTTP 상태 + code) → 분류. 순수 함수. 분류표는 docs/payments-api-draft.md. */
@@ -50,13 +90,22 @@ export function classifyTossError(op: Op, httpStatus: number, code: string): Err
 
   if (op === "cancel") {
     if (code === "ALREADY_CANCELED_PAYMENT" || code === "ALREADY_REFUND_PAYMENT") return "already_canceled";
-    if (code.startsWith("NOT_CANCELABLE_") || code === "EXCEED_MAX_REFUND_DUE") return "not_cancelable";
+    if (code.startsWith("NOT_CANCELABLE_") || code === "EXCEED_MAX_REFUND_DUE" || NOT_CANCELABLE_EXTRA.has(code)) return "not_cancelable";
+    // 은행 서비스 시간이 아님: 환불은 일어나지 않았고 시간이 지나면 가능 → 같은 키로 나중에 재시도
+    if (code === "NOT_AVAILABLE_BANK") return "retry_later";
   }
+
+  // JSON 본문 없는 401(HTTP_401: 프록시·게이트웨이가 돌려준 인증 장애)의 분류는 연산마다 다르다.
+  //  - 조회·취소: fatal(키 오류 알림 지연 방지). 조회는 상태를 바꾸지 않고, 취소는 실패해도 재시도·사람 처리로 복구된다.
+  //  - 승인: uncertain. 앞단의 일시 인증 장애가 승인 처리 뒤의 응답 경로에서 나면 이미 승인된 결제를 FAILED 로 굳히는(고아) 사고가 되므로 조회로 확정한다.
+  //    키 오류 알림은 code 가 HTTP_401 로 남아 있으니 앱이 이 코드를 알림 대상으로 삼는다(JSON 본문이 있는 UNAUTHORIZED_KEY 는 승인에서도 fatal).
+  if (code === "HTTP_401" && op !== "confirm") return "fatal";
 
   if (op !== "confirm" && code === "FORBIDDEN_CONSECUTIVE_REQUEST") return "retry_later";
   if (httpStatus === 429) return op === "confirm" ? "uncertain" : "retry_later";
   if (UNCERTAIN.has(code) || httpStatus >= 500) return "uncertain";
-  if (op === "lookup" && (httpStatus === 404 || code === "NOT_FOUND_PAYMENT" || code === "NOT_FOUND")) return "not_found";
+  // 조회 not_found 는 토스가 NOT_FOUND_PAYMENT 코드로 답했을 때만. 코드 없는 404(프록시·잘못된 baseUrl·라우팅 오류)는 "결제 없음"이 아니라 불확실로 남긴다.
+  if (op === "lookup" && code === "NOT_FOUND_PAYMENT") return "not_found";
 
   // 분명한 실패: 문서에 올라 있고 "결제가 일어나지 않았음"이 분명한 코드만. 그 밖의 모르는 코드는 불확실(조회로 확정).
   if (DEFINITE_FAILURE.has(code)) return "fatal";
@@ -74,8 +123,14 @@ export function classifyFailCode(code: string | null | undefined): FailUrlKind {
 }
 
 /** 조회 결과(Payment)를 앱이 기대한 주문·금액과 대조해 해석한다. expected 는 앱이 DB 에서 가져온 값이어야 한다. */
-export function interpretPayment(payment: TossPayment, expected: { orderId: string; amount: number }): PaymentInterpretation {
+export function interpretPayment(payment: TossPayment, expected: { orderId: string; amount: number; taxFreeAmount?: number }): PaymentInterpretation {
   if (payment.orderId !== expected.orderId || payment.totalAmount !== expected.amount) return "mismatch";
+  // 통화가 KRW 가 아니면 금액이 같아 보여도 같은 값이 아니다(응답에 통화가 없으면 KRW 로 본다)
+  if (payment.currency && payment.currency !== "KRW") return "mismatch";
+  // 면세 금액을 넘긴 앱(면세·복합과세 상점)은 토스에 기록된 값과 달라도 자동 확정하지 않는다(응답에 값이 없으면 대조 불가라 통과)
+  if (expected.taxFreeAmount !== undefined && typeof payment.taxFreeAmount === "number" && payment.taxFreeAmount !== expected.taxFreeAmount) return "mismatch";
+
+  if (isFullyCanceled(payment)) return "canceled";
 
   switch (payment.status) {
     case "DONE":
@@ -84,6 +139,8 @@ export function interpretPayment(payment: TossPayment, expected: { orderId: stri
       return "canceled";
     case "PARTIAL_CANCELED":
       return "partial_canceled";
+    case "WAITING_FOR_DEPOSIT":
+      return "waiting_for_deposit";
     case "ABORTED":
     case "EXPIRED":
       return "not_paid";
