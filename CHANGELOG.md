@@ -2,7 +2,7 @@
 
 `@platform/shared/payments`·`@platform/shared/secrets` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
-## 미정(태그 후보 v0.3.0-rc.3, 개발자 승인 후 결정) — inapp 서브패스 (신규)
+## v0.3.0-rc.3 — inapp 서브패스 (신규)
 
 `@platform/shared/inapp` 추가(기존 API 변경 없음). 카카오톡 인앱 브라우저 처리 중 두 소비 앱이 각자 갖고 있던 순수 로직만 공용화.
 - `isKakaoInApp(userAgent)`: UA 에 `kakaotalk`(대소문자 무관)가 있으면 참, null·undefined·빈 문자열은 거짓.
