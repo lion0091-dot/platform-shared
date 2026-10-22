@@ -152,7 +152,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - `FORBIDDEN_CONSECUTIVE_REQUEST` 가 confirm 에서 오는지: 문서는 조회·취소에만 기재 → confirm 에서는 모르는 코드로 보아 `uncertain`.
 - 429 의 실제 발생·재시도 정책, 승인 직후 주문번호 조회의 반영 지연, paymentKey 최대 길이, 멱등키 허용 문자.
 - 웹훅 수신 자체(서버 라우트)는 범위 밖. 진위 대조는 §8 의 `isWebhookSecretValid` 로 제공(공식 Payment.secret 설명 근거; 웹훅 가이드 페이지에는 검증 절차가 없어 헤더 서명은 확인 못 함).
-- **키가 필요한 실호출 미시험(2026-10-17 갱신)**: Test-Code 헤더 회귀·실결제 `ALREADY_PROCESSED_PAYMENT`·실제 409 / 멱등키 재생이 에러 응답도 재생하는지·15일 이후 / 429·`FORBIDDEN_CONSECUTIVE_REQUEST` 실발생 / 같은 orderId 다른 금액의 실제 거절 코드 / 승인 직후 주문 조회 지연 / paymentKey 최대 길이 / 면세 결제의 부분 취소·`taxFreeAmount` 동작 / 가상계좌 발급·환불·입금 웹훅의 secret 대조 / 5xx 본문 형태. 시험 195건은 모두 가짜 fetch 다.
+- **키가 필요한 실호출 미시험(2026-10-17 갱신)**: Test-Code 헤더 회귀·실제 409(같은 주문·paymentKey·금액 재승인은 실측상 200 DONE 이라 `ALREADY_PROCESSED_PAYMENT` 가 오지 않음 — §5 3-1, 다른 경로로 오는지는 미확인) / 멱등키 재생이 에러 응답도 재생하는지·15일 이후 / 429·`FORBIDDEN_CONSECUTIVE_REQUEST` 실발생 / 같은 orderId 다른 금액의 실제 거절 코드 / 승인 직후 주문 조회 지연 / paymentKey 최대 길이 / 면세 결제의 부분 취소·`taxFreeAmount` 동작 / 가상계좌 발급·환불·입금 웹훅의 secret 대조 / 5xx 본문 형태. 시험 195건은 모두 가짜 fetch 다.
 - 에러 코드 페이지 전체 목록 중 이번에 분류한 것 외의 코드(가상계좌·자동결제 전용 등)는 모두 `uncertain`(승인) 쪽으로 떨어진다 — 더 정확히 하려면 코드 추가 필요.
 - `INVALID_REQUEST`(400)는 에러 코드 페이지의 결제 승인 섹션에서 확인(메시지: 잘못된 요청). 다만 "결제가 일어나지 않았다"는 보장은 문서에 명시돼 있지 않다 — 400 계열이라 거절로 보고 fatal 에 넣었다(판단). 페이지가 일부 잘렸을 수 있어(열람 도구 표시) 다른 코드가 빠졌을 수 있음.
 - 위험(문서 근거 없음): confirm 의 `INVALID_REQUEST` 는 "결제가 일어나지 않았다"는 보장이 토스 문서에 없다. 승인이 이미 처리된 뒤 같은 요청이 `INVALID_REQUEST` 로 거절되는 경우(예: 이미 사용된 paymentKey 형식 문제)가 있는지 미확인 → 앱은 `fatal` 로 FAILED 확정하기 전에 `getPaymentByOrderId` 로 한 번 확인하는 것이 안전하다(비용 작음). 요청 값은 호출 전 검증(금액·orderId)으로 이미 걸러진다.
