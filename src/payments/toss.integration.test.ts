@@ -8,7 +8,7 @@
  *   TOSS_TEST_ORDER_ID     orderId
  *   TOSS_TEST_AMOUNT       amount(원, 3000 이상 — 부분 취소 2회 + 전액 취소를 위해)
  *
- * 실행: npm run test:toss  (절차는 docs/payments-api-draft.md §8)
+ * 실행: npm run test:toss  (절차는 docs/payments-api-draft.md §12)
  * 승인은 결제창 인증 후 제한 시간(문서 10분, §7 미확인) 안에 해야 하고, paymentKey 하나는 한 번만 쓸 수 있다(승인→취소까지 진행됨).
  */
 import { describe, expect, it } from "vitest";
@@ -26,7 +26,7 @@ const HAS_KEY = SECRET !== "";
 const HAS_PAYMENT = HAS_KEY && PAYMENT_KEY !== "" && ORDER_ID !== "" && Number.isSafeInteger(AMOUNT);
 const T = 30_000;
 
-const toss = createTossClient({ secretKey: SECRET });
+const toss = createTossClient({ secretKey: SECRET, expectedMode: "test" });
 const canceledSum = (p: TossPayment) => p.cancels.reduce((s, c) => s + c.cancelAmount, 0);
 
 describe.skipIf(!HAS_KEY)("토스 테스트 환경 — 키만으로(결제창 없이)", () => {
@@ -43,7 +43,7 @@ describe.skipIf(!HAS_KEY)("토스 테스트 환경 — 키만으로(결제창 �
   });
 
   it("틀린 시크릿키 → fatal (UNAUTHORIZED_KEY 등)", { timeout: T }, async () => {
-    const bad = createTossClient({ secretKey: "test_sk_integration_invalid_key" });
+    const bad = createTossClient({ secretKey: "test_sk_integration_invalid_key", expectedMode: "test" });
     const r = await bad.lookupByOrderId(generateOrderId("it-bad-"));
 
     expect(r, JSON.stringify(r)).toMatchObject({ kind: "fatal" });
@@ -84,10 +84,10 @@ describe.skipIf(!HAS_PAYMENT)("토스 테스트 환경 — 결제창 결제 1건
     expect(r, JSON.stringify(r)).toMatchObject({ kind: "success" });
   });
 
-  it("다른 멱등키로 다시 승인 → already_done (ALREADY_PROCESSED_PAYMENT)", { timeout: T }, async () => {
+  it("다른 멱등키로 다시 승인 → success (토스는 200 DONE 을 그대로 돌려줌, 2026-10-16 실측)", { timeout: T }, async () => {
     const r = await toss.confirm({ paymentKey: PAYMENT_KEY, orderId: ORDER_ID, amount: AMOUNT, idempotencyKey: `${confirmIdempotencyKey(ORDER_ID, PAYMENT_KEY)}_2` });
 
-    expect(r, JSON.stringify(r)).toMatchObject({ kind: "already_done" });
+    expect(r, JSON.stringify(r)).toMatchObject({ kind: "success", payment: { status: "DONE" } });
   });
 
   it("주문번호 조회 → found, interpretPayment = paid", { timeout: T }, async () => {
