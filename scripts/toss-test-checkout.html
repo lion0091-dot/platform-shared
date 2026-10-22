@@ -1,0 +1,70 @@
+<!doctype html>
+<!--
+  토스 테스트 결제창 → 통합 시험(src/payments/toss.integration.test.ts)에 쓸 paymentKey 얻기.
+  계약 없이 개발자센터의 "API 개별 연동" 테스트 클라이언트 키(test_ck_…)로 쓴다. 키는 이 파일에 저장하지 않는다.
+  file:// 에서는 SDK 가 동작하지 않을 수 있으니 로컬 서버로 연다: npx serve scripts  (또는 python3 -m http.server -d scripts)
+  성공하면 이 페이지로 돌아와 export 명령을 보여준다. 승인은 제한 시간(약 10분) 안에 npm run test:toss 로 한다.
+-->
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>토스 테스트 결제</title>
+  <script src="https://js.tosspayments.com/v2/standard"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 16px; line-height: 1.5; }
+    input, button { font: inherit; padding: .4rem .6rem; }
+    input { width: 100%; box-sizing: border-box; margin-bottom: .6rem; }
+    pre { background: #f3f3f3; padding: .8rem; overflow-x: auto; }
+    .err { color: #b00020; }
+  </style>
+</head>
+<body>
+  <h1>토스 테스트 결제</h1>
+  <div id="result"></div>
+  <label>테스트 클라이언트 키 (test_ck_…)<input id="ck" placeholder="test_ck_..." autocomplete="off" /></label>
+  <label>금액(원, 3000 이상)<input id="amount" type="number" value="5000" min="3000" /></label>
+  <button id="pay">테스트 카드 결제창 열기</button>
+  <p>테스트 키라 실제 청구는 없다. 결제창에서 아무 카드사나 골라 진행하면 된다.</p>
+
+  <script>
+    const q = new URLSearchParams(location.search);
+    const out = document.getElementById("result");
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+    if (q.get("paymentKey")) {
+      out.innerHTML = `<h2>결제 인증 성공 — 아직 승인 전</h2><p>아래를 터미널에 붙여 넣고 바로 실행한다(시크릿키는 직접 넣는다).</p><pre>export TOSS_TEST_SECRET_KEY=test_sk_...
+export TOSS_TEST_PAYMENT_KEY='${esc(q.get("paymentKey"))}'
+export TOSS_TEST_ORDER_ID='${esc(q.get("orderId"))}'
+export TOSS_TEST_AMOUNT='${esc(q.get("amount"))}'
+npm run test:toss</pre>`;
+    } else if (q.get("code")) {
+      out.innerHTML = `<p class="err">결제 실패: ${esc(q.get("code"))} — ${esc(q.get("message") ?? "")}</p>`;
+    }
+
+    document.getElementById("pay").onclick = async () => {
+      const clientKey = document.getElementById("ck").value.trim();
+      const value = Number(document.getElementById("amount").value);
+
+      if (!/^test_ck_/.test(clientKey)) return alert("API 개별 연동 테스트 클라이언트 키(test_ck_…)를 넣는다.");
+      if (!Number.isSafeInteger(value) || value < 3000) return alert("금액은 3000 이상 정수.");
+
+      const base = location.origin + location.pathname;
+      const payment = TossPayments(clientKey).payment({ customerKey: TossPayments.ANONYMOUS });
+
+      try {
+        await payment.requestPayment({
+          method: "CARD",
+          amount: { currency: "KRW", value },
+          orderId: `it-${crypto.randomUUID()}`,
+          orderName: "통합 시험 결제",
+          successUrl: base,
+          failUrl: base,
+        });
+      } catch (e) {
+        out.innerHTML = `<p class="err">${esc(e.code ?? "")} ${esc(e.message ?? e)}</p>`;
+      }
+    };
+  </script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 # 공용 결제 라이브러리 초안 — `@platform/shared/payments`
 
-상태: 초안(버전·태그 없음, 모의 시험만 통과, 실제 토스 호출 없음). 대상: 소비 앱 개발자. 근거: docs.tosspayments.com 의 에러 코드·멱등키 페이지(2026-10-16 열람), 소비 앱의 기존 결제 코드. 문서에서 확인 못 한 것은 "미확인".
+상태: 초안(버전·태그 없음, 모의 시험만 통과, 실제 토스 호출 없음 — 테스트 키 통합 시험은 §12, 아직 미실행). 대상: 소비 앱 개발자. 근거: docs.tosspayments.com 의 에러 코드·멱등키 페이지(2026-10-16 열람), 소비 앱의 기존 결제 코드. 문서에서 확인 못 한 것은 "미확인".
 
 ## 1. 범위
 포함: 승인(confirm)·조회(주문번호/paymentKey)·취소(cancel) 호출, Basic 인증, 타임아웃, Idempotency-Key 규칙, 승인 응답 검증, 오류 분류, failUrl code 분류, 주문번호 검증·생성.
@@ -152,7 +152,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - `FORBIDDEN_CONSECUTIVE_REQUEST` 가 confirm 에서 오는지: 문서는 조회·취소에만 기재 → confirm 에서는 모르는 코드로 보아 `uncertain`.
 - 429 의 실제 발생·재시도 정책, 승인 직후 주문번호 조회의 반영 지연, paymentKey 최대 길이, 멱등키 허용 문자.
 - 웹훅 수신 자체(서버 라우트)는 범위 밖. 진위 대조는 §8 의 `isWebhookSecretValid` 로 제공(공식 Payment.secret 설명 근거; 웹훅 가이드 페이지에는 검증 절차가 없어 헤더 서명은 확인 못 함).
-- **키가 필요한 실호출 미시험(2026-10-17 갱신)**: Test-Code 헤더 회귀·실결제 `ALREADY_PROCESSED_PAYMENT`·실제 409 / 멱등키 재생이 에러 응답도 재생하는지·15일 이후 / 429·`FORBIDDEN_CONSECUTIVE_REQUEST` 실발생 / 같은 orderId 다른 금액의 실제 거절 코드 / 승인 직후 주문 조회 지연 / paymentKey 최대 길이 / 면세 결제의 부분 취소·`taxFreeAmount` 동작 / 가상계좌 발급·환불·입금 웹훅의 secret 대조 / 5xx 본문 형태. 시험 195건은 모두 가짜 fetch 다.
+- **키가 필요한 실호출 미시험(2026-10-17 갱신)**: Test-Code 헤더 회귀·실제 409(같은 주문·paymentKey·금액 재승인은 실측상 200 DONE 이라 `ALREADY_PROCESSED_PAYMENT` 가 오지 않음 — §5 3-1, 다른 경로로 오는지는 미확인) / 멱등키 재생이 에러 응답도 재생하는지·15일 이후 / 429·`FORBIDDEN_CONSECUTIVE_REQUEST` 실발생 / 같은 orderId 다른 금액의 실제 거절 코드 / 승인 직후 주문 조회 지연 / paymentKey 최대 길이 / 면세 결제의 부분 취소·`taxFreeAmount` 동작 / 가상계좌 발급·환불·입금 웹훅의 secret 대조 / 5xx 본문 형태. 시험 195건은 모두 가짜 fetch 다.
 - 에러 코드 페이지 전체 목록 중 이번에 분류한 것 외의 코드(가상계좌·자동결제 전용 등)는 모두 `uncertain`(승인) 쪽으로 떨어진다 — 더 정확히 하려면 코드 추가 필요.
 - `INVALID_REQUEST`(400)는 에러 코드 페이지의 결제 승인 섹션에서 확인(메시지: 잘못된 요청). 다만 "결제가 일어나지 않았다"는 보장은 문서에 명시돼 있지 않다 — 400 계열이라 거절로 보고 fatal 에 넣었다(판단). 페이지가 일부 잘렸을 수 있어(열람 도구 표시) 다른 코드가 빠졌을 수 있음.
 - 위험(문서 근거 없음): confirm 의 `INVALID_REQUEST` 는 "결제가 일어나지 않았다"는 보장이 토스 문서에 없다. 승인이 이미 처리된 뒤 같은 요청이 `INVALID_REQUEST` 로 거절되는 경우(예: 이미 사용된 paymentKey 형식 문제)가 있는지 미확인 → 앱은 `fatal` 로 FAILED 확정하기 전에 `getPaymentByOrderId` 로 한 번 확인하는 것이 안전하다(비용 작음). 요청 값은 호출 전 검증(금액·orderId)으로 이미 걸러진다.
@@ -160,7 +160,7 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 - `balanceAmount`·`cancels` 필드명·타입은 토스 reference 페이지(Payment 객체)에서 확인: `balanceAmount` number, `cancels` nullable array(`cancelAmount`·`cancelReason`·`canceledAt`·`transactionKey`·`cancelStatus` 등). 전용 payment-object 주소는 404 였고 reference 메인에서 확인.
 - 에러 응답의 멱등키 재생 여부(§4)는 미확인(안전 쪽 가정: 재생됨).
 - `TossPayment` 는 현재 method 외의 카드 정보·영수증 URL 등을 포함하지 않는다(필요해지면 추가).
-- 모든 동작은 fetch 모의로만 검증, 실제 토스 호출·테스트 키 검증 없음.
+- 모든 동작은 fetch 모의로만 검증, 실제 토스 호출·테스트 키 검증 없음. 테스트 키 통합 시험(§12)은 작성만 됐고 아직 돌려보지 않았다(작성 환경에서 api.tosspayments.com 접속 불가).
 
 ## 8. 가상계좌·웹훅 (2026-10-17 추가)
 - 가상계좌 승인은 `waiting_for_deposit` 으로 온다(승인 완료 아님). 앱은 `payment.virtualAccount`(계좌·은행·기한)를 안내하고 PENDING 을 유지한다.
@@ -206,3 +206,20 @@ const toss = createTossClient({ secretKey: process.env.TOSS_SECRET_KEY! }); // f
 ## 11. 버전 메모
 - v0.3.0-rc.1(`0db3db3`)은 이미 공개 태그다. 이번 변경(CHANGELOG.md 의 BREAKING 포함)은 같은 `0.3.0` 계열의 **다음 rc 에서 breaking 이 다시 들어가는** 것이다(rc 는 안정 API 를 약속하지 않는 사전 배포라는 전제). 두 앱은 `#v0.2.2` 고정이라 rc.1 을 쓰는 곳은 없다.
 - 다음 버전은 **`0.3.0-rc.2`** 로 결정됨(사장님, 2026-10-18; `0.4.0-rc.1` 안은 채택하지 않음). 태그 생성·공개 push 는 사장님이 직접 승인한 뒤에만 한다. CHANGELOG 의 표기는 이미 `v0.3.0-rc.2` 로 바꿨다.
+
+## 12. 테스트 키 통합 시험(계약 전 가능)
+토스는 계약 없이 개발자센터 가입만으로 테스트 키를 준다(`test_ck_`/`test_sk_` = API 개별 연동, `test_gck_`/`test_gsk_` = 결제위젯). 테스트와 운영은 같은 주소(`api.tosspayments.com`)를 쓰고 키 접두어로 모드가 갈린다 — 코드는 그대로, 키만 바꾼다. 실제 청구는 없다.
+
+시험 파일 `src/payments/toss.integration.test.ts`, 실행 `npm run test:toss`. 환경변수가 없으면 건너뛰므로 평소 `npm test` 에는 외부 호출이 없다. `live_` 키를 넣으면 시험 파일이 즉시 실패한다(실제 환불 방지).
+
+1단계 — 키만으로(결제창 불필요): `TOSS_TEST_SECRET_KEY=test_sk_… npm run test:toss`
+- 없는 주문번호·paymentKey 조회 → `not_found`, 틀린 키 → `fatal`, 가짜 paymentKey 승인 → `session_expired`/`fatal`, 가짜 paymentKey 취소 → `fatal`/`not_cancelable`. 인증 헤더와 실제 오류 코드의 분류를 확인한다.
+
+2단계 — 결제 1건으로 전 과정(승인·멱등 재생·조회·부분취소 2회·전액취소·중복취소):
+1. `npx serve scripts` 로 `scripts/toss-test-checkout.html` 을 열고 테스트 클라이언트 키(`test_ck_…`, 시크릿키와 같은 API 개별 연동 키 쌍)와 금액(3000 이상)을 넣어 결제창에서 결제한다.
+2. 돌아온 페이지가 보여주는 `TOSS_TEST_PAYMENT_KEY`·`TOSS_TEST_ORDER_ID`·`TOSS_TEST_AMOUNT` 를 export 하고 **제한 시간(약 10분, §7) 안에** `npm run test:toss`.
+3. paymentKey 하나는 한 번만 쓴다(시험이 승인 후 전액 취소까지 진행). 다시 돌리려면 1부터.
+
+기대와 다른 kind 가 나오면 실패 메시지에 결과 JSON(토스 code 포함)이 찍힌다 — 그 code 로 §3 분류표·`classify.ts` 를 고친다. 이 시험이 확인하는 미확인 항목: 같은 멱등키 재호출의 응답 재생(§4), `ALREADY_CANCELED_PAYMENT` 의 실제 발생, 부분 취소 응답의 `cancels`·`balanceAmount`.
+
+이미 DONE 인 결제에 다시 confirm 하면 같은 멱등키·다른 멱등키 모두 `ALREADY_PROCESSED_PAYMENT` 가 아니라 200 DONE(`success`)이 온다(2026-10-16 실측, §5 3-1). 시험도 이 실측을 기대값으로 쓴다. 실결제로 `ALREADY_PROCESSED_PAYMENT` 가 오는 경우는 아직 못 만났다(분류 코드는 유지).
