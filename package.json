@@ -15,7 +15,7 @@
   "files": ["src"],
   "scripts": {
     "test": "vitest run",
-    "test:toss": "vitest run src/payments/toss.integration.test.ts",
+    "test:toss": "vitest run --config vitest.toss.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
