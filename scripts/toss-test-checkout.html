@@ -32,12 +32,26 @@
     const out = document.getElementById("result");
     const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-    if (q.get("paymentKey")) {
-      out.innerHTML = `<h2>결제 인증 성공 — 아직 승인 전</h2><p>아래를 터미널에 붙여 넣고 바로 실행한다(시크릿키는 직접 넣는다).</p><pre>export TOSS_TEST_SECRET_KEY=test_sk_...
-export TOSS_TEST_PAYMENT_KEY='${esc(q.get("paymentKey"))}'
-export TOSS_TEST_ORDER_ID='${esc(q.get("orderId"))}'
-export TOSS_TEST_AMOUNT='${esc(q.get("amount"))}'
+    // 쿼리 값이 셸 명령에 그대로 들어가므로, 토스가 주는 형식(영숫자·_-.=)일 때만 보여준다. 아니면 명령을 만들지 않는다.
+    const safe = (v) => typeof v === "string" && /^[A-Za-z0-9_\-.=]{1,200}$/.test(v);
+    const paymentKey = q.get("paymentKey"), orderId = q.get("orderId"), amount = q.get("amount");
+
+    if (paymentKey) {
+      if (!safe(paymentKey) || !safe(orderId) || !/^[1-9][0-9]{0,11}$/.test(amount ?? "")) {
+        out.innerHTML = `<p class="err">쿼리 값이 예상한 형식이 아니라 명령을 만들지 않았다. 주소를 직접 고친 것이 아닌지 확인하고 결제를 처음부터 다시 한다.</p>`;
+      } else {
+        out.innerHTML = `<h2>결제 인증 성공 — 아직 승인 전</h2><p>아래를 터미널에 붙여 넣고 바로 실행한다(시크릿키는 직접 넣는다).</p>
+<p>bash / zsh / Git Bash</p><pre>export TOSS_TEST_SECRET_KEY=test_sk_...
+export TOSS_TEST_PAYMENT_KEY='${esc(paymentKey)}'
+export TOSS_TEST_ORDER_ID='${esc(orderId)}'
+export TOSS_TEST_AMOUNT='${esc(amount)}'
+npm run test:toss</pre>
+<p>PowerShell</p><pre>$env:TOSS_TEST_SECRET_KEY = "test_sk_..."
+$env:TOSS_TEST_PAYMENT_KEY = '${esc(paymentKey)}'
+$env:TOSS_TEST_ORDER_ID = '${esc(orderId)}'
+$env:TOSS_TEST_AMOUNT = '${esc(amount)}'
 npm run test:toss</pre>`;
+      }
     } else if (q.get("code")) {
       out.innerHTML = `<p class="err">결제 실패: ${esc(q.get("code"))} — ${esc(q.get("message") ?? "")}</p>`;
     }
@@ -50,9 +64,10 @@ npm run test:toss</pre>`;
       if (!Number.isSafeInteger(value) || value < 3000) return alert("금액은 3000 이상 정수.");
 
       const base = location.origin + location.pathname;
-      const payment = TossPayments(clientKey).payment({ customerKey: TossPayments.ANONYMOUS });
 
       try {
+        const payment = TossPayments(clientKey).payment({ customerKey: TossPayments.ANONYMOUS });
+
         await payment.requestPayment({
           method: "CARD",
           amount: { currency: "KRW", value },
