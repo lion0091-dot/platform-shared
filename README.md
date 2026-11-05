@@ -13,6 +13,8 @@
 - `@platform/shared/secrets` — 테넌트별 비밀(결제 키·알림 자격정보 등)을 DB 에 넣기 전에 앱 서버에서 암호화하는 공용 봉투(AES-256-GCM). `sealSecret`/`openSecret`(`ENC:v2:<kid>:…`, AAD=테넌트 id+종류), `loadKeyring`(현재 키+이전 키 로테이션, hex 64자·base64 모두 허용), 기존 두 형식의 읽기 전용 레거시 지원, `resolveSecret`(ok/absent/unavailable 3상태). **서버 전용**(`node:crypto`), 키·평문은 오류·로그에 나오지 않는다. 설계: `docs/tenant-secrets-envelope-design.md`. 시험 벡터는 가짜 키만(`src/secrets/__vectors__/`).
 - `@platform/shared/inapp` — 카카오톡 인앱 브라우저 판별(`isKakaoInApp`)·외부 브라우저로 열기 주소(`kakaoExternalOpenUrl`)·경로 접두어 판정(`matchesPathPrefixes`). 순수 함수만 있고, 안내 화면과 경로 목록은 앱이 가진다.
 
+- `@platform/shared/board` — 이원화 게시판의 공용 계약(`board_contract_version` v1): 코드값(분류·상태·작성자 유형·답글 가시성)·가시 범위/답글/승격/전이 판정(`canView`·`canReply`·`canEscalate`·`canTransition`)·`detectPii`·`validateEscalation`·작성 제한과 허용 범위·안내 문구 상수·첨부 규칙 상수와 `validateAttachmentMeta`·감사 이벤트 코드와 2인 승인 요청 계약 상수. 순수 함수·상수만 있고 화면·표·RPC·알림·저장은 앱이 가진다. 계약 문서 `docs/board-contract.md`.
+
 ## 쓰는 법(앱 쪽)
 1. `package.json`: `"@platform/shared": "github:lion0091-dot/platform-shared#v0.1.0"` (버전은 태그로 고정, 올릴 때 두 앱을 같이 올린다).
 2. `next.config`: `transpilePackages: ["@platform/shared"]`.

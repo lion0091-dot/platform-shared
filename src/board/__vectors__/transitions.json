@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "note": "canTransition(from, to, actorSide, hasEscalateRole) 전수 벡터. 앱의 DB 전이 구현과 대조한다.",
+  "allowed": [
+    ["NONE", "RECEIVED", "TENANT", true],
+    ["DONE", "RECEIVED", "TENANT", true],
+    ["NEED_INFO", "RECEIVED", "TENANT", false],
+    ["NEED_INFO", "RECEIVED", "TENANT", true],
+    ["RECEIVED", "IN_PROGRESS", "PLATFORM", false],
+    ["RECEIVED", "NEED_INFO", "PLATFORM", false],
+    ["RECEIVED", "DONE", "PLATFORM", false],
+    ["RECEIVED", "DECLINED", "PLATFORM", false],
+    ["IN_PROGRESS", "NEED_INFO", "PLATFORM", false],
+    ["IN_PROGRESS", "DONE", "PLATFORM", false],
+    ["IN_PROGRESS", "DECLINED", "PLATFORM", false]
+  ],
+  "denied": [
+    ["NONE", "RECEIVED", "TENANT", false],
+    ["DONE", "RECEIVED", "TENANT", false],
+    ["NONE", "RECEIVED", "PLATFORM", true],
+    ["NONE", "IN_PROGRESS", "PLATFORM", true],
+    ["RECEIVED", "RECEIVED", "PLATFORM", true],
+    ["RECEIVED", "IN_PROGRESS", "TENANT", true],
+    ["IN_PROGRESS", "RECEIVED", "PLATFORM", true],
+    ["IN_PROGRESS", "RECEIVED", "TENANT", true],
+    ["NEED_INFO", "IN_PROGRESS", "PLATFORM", true],
+    ["NEED_INFO", "DONE", "PLATFORM", true],
+    ["DONE", "IN_PROGRESS", "PLATFORM", true],
+    ["DONE", "DECLINED", "PLATFORM", true],
+    ["DECLINED", "RECEIVED", "TENANT", true],
+    ["DECLINED", "RECEIVED", "PLATFORM", true],
+    ["DECLINED", "IN_PROGRESS", "PLATFORM", true]
+  ]
+}
