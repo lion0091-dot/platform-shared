@@ -2,6 +2,16 @@
 
 `@platform/shared/payments`·`@platform/shared/secrets` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
+## 미정(태그 후보 v0.4.0-rc.1) — board 서브패스 (신규, 로컬 구현·미커밋)
+
+`@platform/shared/board` 추가(기존 API 변경 없음). 설계 `docs/design-two-tier-board-shared-2026-11.md`, 계약 `docs/board-contract.md`(`board_contract_version` v1). 순수 함수·상수만, 의존성 추가 없음(EXIF 제거 라이브러리는 포함하지 않음 — 앱, 별도 승인).
+- 코드값: 1층 분류 4(`NOTICE`·`QUESTION`·`HANDOVER`·`SUGGESTION`), 2층 분류 4, 2층 상태 5, 작성자 유형 `STAFF`/`USER`, 답글 가시성 `AUTHOR`/`TENANT_ONLY`/`PLATFORM`, 앱 키 3, 분석 뷰 `board_escalations_v`와 열 목록, 오류 코드.
+- 판정: `canView`·`canViewReply`·`canReply`·`allowedReplyVisibilities`·`canEscalate`·`canTransition`·`requiresReason`·`validateEscalation`·`needsStaffReply`, `detectPii`(전화·주민번호·계좌·이메일 형태, 종류만 반환).
+- 설정: 작성 제한 기본값·허용 범위(`BOARD_SETTINGS`)와 `validateSetting`·`clampSetting`·`effectiveSetting`·`writeLimits`·`exceedsLimit`, 안내 문구 상수(`locked` 포함)와 `validateOverride`·`resolveNotice`.
+- 첨부: 상수(5개·4MB·합계 15MB·허용 확장자·금지 확장자)와 `validateAttachmentMeta`(이름·크기·앞부분 바이트)·`sanitizeDisplayName`·`exceedsAttachLimit`·`exceedsDailyAttachBytes`.
+- 감사·승인: 감사 action 코드(`board.*`)·위험 단계 표·사유 검증·2인 승인 요청 표 열/상태 계약 상수와 `validateApprovalDecision`·`approvalExpiresAt`. 2인 승인 장치는 2단계(오픈 전 필수).
+- 시험 벡터 `src/board/__vectors__/`(전이표·개인정보). package.json 버전은 태그 승인 때 정한다.
+
 ## v0.3.0-rc.3 — inapp 서브패스 (신규)
 
 `@platform/shared/inapp` 추가(기존 API 변경 없음). 카카오톡 인앱 브라우저 처리 중 두 소비 앱이 각자 갖고 있던 순수 로직만 공용화.
