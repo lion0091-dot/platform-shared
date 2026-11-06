@@ -70,12 +70,16 @@
 ## 9. 첨부 (src/board/attachments.ts, 결정 #34~#49)
 | 상수 | 값 |
 |---|---|
-| 적용 | **2층만**(1층 첨부 없음). 글(또는 답글) 1건당 **5개**, 파일당 **4MB**(1MB=1024*1024), 건당 합계 **15MB**, 사용자별 일 **50MB**(설정) |
+| 적용 | **2층만**(1층 첨부 없음), 업로더는 운영사 직원·플랫폼 운영자(아래). 글(또는 답글) 1건당 **5개**, 파일당 **4MB**(1MB=1024*1024), 건당 합계 **15MB**, 사용자별 일 **50MB**(설정) |
 | 허용 확장자 | `jpg`(image/jpeg) · `png` · `webp` · `pdf` · `txt` · `log`(text/plain) — 허용 목록 방식 |
 | 금지(이중 안전망) | `exe bat cmd ps1 sh js vbs msi dll jar apk scr com html htm svg zip 7z rar` — 이중 확장자의 **어느 구간**이든 걸리면 거부 |
 | 표시 이름 | 100자, 경로·제어문자·방향 제어문자 제거. 개인정보가 걸리면 `첨부N.확장자` 로 대체 |
 - `validateAttachmentMeta({ name, size, head })`: **브라우저 Content-Type 은 받지 않고** 앞부분 바이트(매직 바이트, 앞 1KB 권장)로 판정한다. `txt`·`log` 는 NUL·제어문자가 없고 실행·압축·GIF 서명이 아니어야 한다. 오류: `ATTACH_TYPE_NOT_ALLOWED`·`ATTACH_CONTENT_MISMATCH`·`ATTACH_TOO_LARGE`·`ATTACH_NAME_INVALID`.
 - **공용에 없는 것(앱)**: 저장·경로(`<tenant>/<post>/<uuid>.<확장자>`)·서명 URL(권장 10분, 발급 직전 권한 재확인)·EXIF 제거(라이브러리는 별도 승인)·버킷 한도·정리 크론·개인정보 가림 확인 체크의 기록(`privacy_confirmed_by/at`)·`service_role` 사용 허용 목록(쓰기 RPC, 서명 URL 발급 직전 재확인, 정리 크론).
+- **업로더(`uploaded_by_kind`)**: `STAFF`(운영사 직원) · `PLATFORM_ADMIN`(플랫폼 운영자, `BOARD_ATTACH_UPLOADER_KINDS`). 일반 사용자는 불가. 플랫폼 운영자의 첨부는 **본인(PLATFORM) 답글 단위만**이다. `canAttachToReply(업로더, 답글 쪽)`: 직원 → `TENANT` 답글에만, 플랫폼 운영자 → `PLATFORM` 답글에만(서로 다른 쪽 답글에는 불가).
+- **개인정보 확인 문구는 업로더별로 구분**: 직원은 공용 `ATTACH_PRIVACY_CONFIRM`·`ATTACH_NOTICE_REDACT`(locked). 플랫폼 운영자용 문구는 앱 상수로 둘 수 있다(공용 id 없음). 어느 쪽이든 「스크린샷에 다른 운영사·사용자 정보가 보이지 않게」 주의를 담는다. 확인 체크의 기록은 앱.
+- **운영사 상태별(앱 판정)**: 정지·계약만료(`LIMITED`) 운영사에도 플랫폼 첨부 허용, 해지(`CLOSED`)는 거부.
+- **열람·삭제(변경 없음)**: 열람 = 같은 운영사 직원 전원 + 플랫폼 운영자(플랫폼 열람은 접근 기록), 삭제 = 대표·경리급(관리 권한자) 또는 플랫폼 운영자.
 - 업로드는 서버 경유, 요청 1건에 파일 1개(결정 #46). 플랫폼 운영자 화면의 서버 코드는 1층 표를 `service_role` 로 읽지 않는다(결정 #47).
 
 ## 10. 감사·승인 계약 상수 (src/board/audit.ts)

@@ -29,6 +29,8 @@ import {
   effectiveSetting,
   exceedsAttachLimit,
   exceedsDailyAttachBytes,
+  canAttachToReply,
+  BOARD_ATTACH_UPLOADER_KINDS,
   exceedsLimit,
   needsStaffReply,
   requiresReason,
@@ -447,5 +449,18 @@ describe("감사·사유·2인 승인", () => {
     expect(validateApprovalDecision({ ...base, now: expiresAt })).toEqual({ ok: false, code: BOARD_ERRORS.APPROVAL_EXPIRED });
     expect(validateApprovalDecision({ ...base, decision: "REJECT" })).toEqual({ ok: false, code: BOARD_ERRORS.REASON_REQUIRED });
     expect(validateApprovalDecision({ ...base, decision: "REJECT", decisionReason: "내용이 이상함" })).toEqual({ ok: true });
+  });
+});
+
+describe("첨부 업로더(canAttachToReply)", () => {
+  it("업로더 유형은 STAFF·PLATFORM_ADMIN 둘뿐", () => {
+    expect([...BOARD_ATTACH_UPLOADER_KINDS]).toEqual(["STAFF", "PLATFORM_ADMIN"]);
+  });
+
+  it("직원은 TENANT 답글에만, 플랫폼 운영자는 PLATFORM 답글에만", () => {
+    expect(canAttachToReply("STAFF", "TENANT")).toBe(true);
+    expect(canAttachToReply("STAFF", "PLATFORM")).toBe(false);
+    expect(canAttachToReply("PLATFORM_ADMIN", "PLATFORM")).toBe(true);
+    expect(canAttachToReply("PLATFORM_ADMIN", "TENANT")).toBe(false);
   });
 });

@@ -7,6 +7,7 @@
 `board_contract_version` v1 유지(값·코드 이름 변경 없음, 권한 규칙만 완화).
 - `canEscalate`·`canTransition(NONE→RECEIVED, TENANT)`·`validateEscalation`: 승격은 테넌트 직원(STAFF) 전원 가능. `hasEscalateRole` 은 승격 판정에서 무시(옵션·호환용, `validateEscalation` 입력에서는 생략 가능). 승격 때 `NOT_AUTHORIZED` 는 더 이상 나오지 않음.
 - 그대로: 재오픈(DONE→RECEIVED)은 `hasEscalateRole`(대표·매니저급)만. 내용 지우기·설정·첨부 삭제는 앱이 기존대로 관리 권한자에게만.
+- 첨부: 업로더 유형 `BOARD_ATTACH_UPLOADER_KINDS`(`STAFF`·`PLATFORM_ADMIN`)와 `canAttachToReply` 추가(하위호환 추가). 플랫폼 운영자는 본인 답글 단위만, 개인정보 확인 문구는 업로더별 구분, 정지·만료(LIMITED) 허용·해지(CLOSED) 거부(앱 판정)를 계약 §9 에 명시.
 - 벡터 `transitions.json`: `NONE→RECEIVED TENANT 권한 false` 가 거부에서 허용으로 이동. 앱은 DB 전이 대조 시험을 이 벡터로 갱신.
 
 ## 미정(태그 후보 v0.4.0-rc.1) — board 서브패스 (신규, 로컬 구현·미커밋)
