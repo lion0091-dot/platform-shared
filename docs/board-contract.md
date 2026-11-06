@@ -30,18 +30,18 @@
 
 ## 4. 쓰기·답글·승격
 - `canReply`: 1층은 직원, 그리고 일반 사용자 본인(자기 글). 2층은 직원·플랫폼, **`DECLINED` 글은 답글 불가**(재문의는 새 글). `allowedReplyVisibilities` 는 작성 가능한 가시성을 돌려준다(직원 1층: `AUTHOR`·`TENANT_ONLY`, 사용자: `AUTHOR`, 2층: `PLATFORM`).
-- `canEscalate`: 직원 + 자기 테넌트 + `hasEscalateRole`(앱이 「대표·경리급」으로 판정해 넘기는 불리언) + 아직 승격 안 된 1층 글. 일반 사용자는 직접 못 올린다.
-- `validateEscalation`: 권한, 2층 분류, 「개인정보 없음 확인」 체크, 제목·본문 비어 있지 않음, 승격 사유 1~500자, **제목·본문 `detectPii` 재검사**. 오류는 코드 목록으로, 걸린 개인정보는 **종류만** 알려 준다. 승격 때 작성자 유형·이름·연락처·1층 대화는 2층에 넘기지 않는다(앱).
+- `canEscalate`: 직원(STAFF) **전원** + 자기 테넌트 + 아직 승격 안 된 1층 글(역할 구분 없음). 일반 사용자는 직접 못 올린다. `hasEscalateRole` 은 승격 판정에서 무시한다(호환용).
+- `validateEscalation`: 2층 분류, 「개인정보 없음 확인」 체크, 제목·본문 비어 있지 않음, 승격 사유 1~500자, **제목·본문 `detectPii` 재검사**. 오류는 코드 목록으로, 걸린 개인정보는 **종류만** 알려 준다. 승격 때 작성자 유형·이름·연락처·1층 대화는 2층에 넘기지 않는다(앱).
 - 일반 사용자에게 승격 사실을 알리지 않는다(결정 #14).
 
 ## 5. 전이표 (canTransition, 벡터 `src/board/__vectors__/transitions.json`)
 | 현재 | 다음 | 누가 |
 |---|---|---|
-| NONE | RECEIVED(승격) | TENANT, 승격 권한자. 한 방향 |
+| NONE | RECEIVED(승격) | TENANT, **직원 전원**. 한 방향 |
 | RECEIVED | IN_PROGRESS · NEED_INFO · DONE · DECLINED | PLATFORM |
 | IN_PROGRESS | NEED_INFO · DONE · DECLINED | PLATFORM |
 | NEED_INFO | RECEIVED | TENANT |
-| DONE | RECEIVED(재오픈) | TENANT, 승격 권한자 |
+| DONE | RECEIVED(재오픈) | TENANT, 관리 권한자(`hasEscalateRole`: 대표·매니저급, 앱이 판정) |
 | DECLINED | — | 끝(재문의는 새 글) |
 - `requiresReason(to)`: `DECLINED`·`NEED_INFO` 는 사유(답글) 필수.
 - DB 는 `for update` + `ALREADY_PROCESSED` 로 강제(앱). **앱은 이 벡터와 자기 DB 구현을 대조하는 시험을 둔다.**

@@ -94,22 +94,24 @@ export function allowedReplyVisibilities(
   return ["PLATFORM"];
 }
 
-/** 1층 글을 승격할 수 있는가. 승격 권한(hasEscalateRole)은 앱이 「대표·경리급」으로 판정해 넘긴다. */
+/**
+ * 1층 글을 승격할 수 있는가. 자기 테넌트의 운영사 직원(STAFF) 전원이 승격할 수 있다(역할 무관).
+ * hasEscalateRole 은 더 이상 보지 않는다(호환용으로 받기만 함).
+ */
 export function canEscalate(
   post: { tier: BoardTier; escalated?: boolean },
-  actor: BoardViewer & { hasEscalateRole?: boolean },
+  actor: BoardViewer & { /** @deprecated 승격은 직원 전원 — 무시된다 */ hasEscalateRole?: boolean },
 ): boolean {
   return (
     post.tier === 1 &&
     post.escalated !== true &&
     actor.viewerKind === "STAFF" &&
-    actor.sameTenant === true &&
-    actor.hasEscalateRole === true
+    actor.sameTenant === true
   );
 }
 
 /**
- * 2층 전이표. NONE→RECEIVED(승격)와 DONE→RECEIVED(재오픈)는 승격 권한자(hasEscalateRole)만.
+ * 2층 전이표. NONE→RECEIVED(승격)는 테넌트 직원 전원, DONE→RECEIVED(재오픈)만 관리 권한자(hasEscalateRole: 대표·매니저급).
  * 되돌림 없음: 승격은 한 방향, DECLINED 는 끝(재문의는 새 글).
  */
 export function canTransition(
@@ -120,7 +122,7 @@ export function canTransition(
 ): boolean {
   if (actorSide === "TENANT") {
     if (from === "NONE" && to === "RECEIVED") {
-      return hasEscalateRole;
+      return true;
     }
     if (from === "DONE" && to === "RECEIVED") {
       return hasEscalateRole;
@@ -143,7 +145,8 @@ export function requiresReason(to: BoardTier2Status): boolean {
 }
 
 export interface EscalationInput {
-  hasEscalateRole: boolean;
+  /** @deprecated 승격은 직원 전원이라 검사하지 않는다(호환용, 생략 가능) */
+  hasEscalateRole?: boolean;
   /** 「개인정보 없음 확인」 체크 */
   privacyConfirmed: boolean;
   category: string;
@@ -157,13 +160,10 @@ export type EscalationResult =
   | { ok: true }
   | { ok: false; errors: string[]; pii?: PiiKind[] };
 
-/** 승격 직전 검증: 권한·분류·확인 체크·사유·본문 개인정보 재검사. 걸린 종류만 알려 주고 값은 되돌리지 않는다. */
+/** 승격 직전 검증: 분류·확인 체크·사유·본문 개인정보 재검사. 걸린 종류만 알려 주고 값은 되돌리지 않는다. */
 export function validateEscalation(input: EscalationInput): EscalationResult {
   const errors: string[] = [];
 
-  if (!input.hasEscalateRole) {
-    errors.push(BOARD_ERRORS.NOT_AUTHORIZED);
-  }
   if (!(BOARD_TIER2_CATEGORIES as readonly string[]).includes(input.category)) {
     errors.push(BOARD_ERRORS.INVALID_CATEGORY);
   }

@@ -162,9 +162,10 @@ describe("canReply / allowedReplyVisibilities", () => {
 describe("canEscalate", () => {
   const base = { viewerKind: "STAFF", sameTenant: true, hasEscalateRole: true } as const;
 
-  it("대표·경리급 직원이 자기 테넌트의 아직 승격 안 된 1층 글만", () => {
+  it("직원 전원(역할 무관)이 자기 테넌트의 아직 승격 안 된 1층 글만", () => {
     expect(canEscalate({ tier: 1 }, base)).toBe(true);
-    expect(canEscalate({ tier: 1 }, { ...base, hasEscalateRole: false })).toBe(false);
+    expect(canEscalate({ tier: 1 }, { ...base, hasEscalateRole: false })).toBe(true);
+    expect(canEscalate({ tier: 1 }, { viewerKind: "STAFF", sameTenant: true })).toBe(true);
     expect(canEscalate({ tier: 1 }, { ...base, sameTenant: false })).toBe(false);
     expect(canEscalate({ tier: 1, escalated: true }, base)).toBe(false);
     expect(canEscalate({ tier: 2 }, base)).toBe(false);
@@ -186,7 +187,7 @@ describe("전이표(벡터)", () => {
 
   it("전수 조합: 허용 목록 밖은 전부 거부(허용 벡터와 일치)", () => {
     const froms: BoardStatus[] = ["NONE", ...BOARD_TIER2_STATUSES];
-    const allowedKeys = new Set((transitions.allowed as Row[]).filter((r) => r[3] || r[0] !== "NONE").map((r) => `${r[0]}>${r[1]}>${r[2]}`));
+    const allowedKeys = new Set((transitions.allowed as Row[]).map((r) => `${r[0]}>${r[1]}>${r[2]}`));
     for (const from of froms) {
       for (const to of BOARD_TIER2_STATUSES) {
         for (const side of ["TENANT", "PLATFORM"] as const) {
@@ -220,13 +221,12 @@ describe("validateEscalation", () => {
     expect(validateEscalation(good)).toEqual({ ok: true });
   });
 
-  it("권한·분류·확인 체크·사유·내용 누락을 모두 알려 준다", () => {
-    const r = validateEscalation({ ...good, hasEscalateRole: false, category: "BILLING", privacyConfirmed: false, reason: "  ", title: "", body: "" });
+  it("분류·확인 체크·사유·내용 누락을 모두 알려 준다", () => {
+    const r = validateEscalation({ ...good, category: "BILLING", privacyConfirmed: false, reason: "  ", title: "", body: "" });
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.errors).toEqual(
         expect.arrayContaining([
-          BOARD_ERRORS.NOT_AUTHORIZED,
           BOARD_ERRORS.INVALID_CATEGORY,
           BOARD_ERRORS.PRIVACY_NOT_CONFIRMED,
           BOARD_ERRORS.EMPTY_CONTENT,
