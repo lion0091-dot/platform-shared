@@ -3,6 +3,7 @@
   "note": "canTransition(from, to, actorSide, hasEscalateRole) 전수 벡터. 앱의 DB 전이 구현과 대조한다.",
   "allowed": [
     ["NONE", "RECEIVED", "TENANT", true],
+    ["NONE", "RECEIVED", "TENANT", false],
     ["DONE", "RECEIVED", "TENANT", true],
     ["NEED_INFO", "RECEIVED", "TENANT", false],
     ["NEED_INFO", "RECEIVED", "TENANT", true],
@@ -15,7 +16,6 @@
     ["IN_PROGRESS", "DECLINED", "PLATFORM", false]
   ],
   "denied": [
-    ["NONE", "RECEIVED", "TENANT", false],
     ["DONE", "RECEIVED", "TENANT", false],
     ["NONE", "RECEIVED", "PLATFORM", true],
     ["NONE", "IN_PROGRESS", "PLATFORM", true],

@@ -33,6 +33,22 @@ export const BOARD_ATTACH_BLOCKED_EXT = [
   "html", "htm", "svg", "zip", "7z", "rar",
 ] as const;
 
+/** 첨부 업로더 유형(첨부 메타 uploaded_by_kind 값). 일반 사용자(USER)는 첨부할 수 없다. */
+export const BOARD_ATTACH_UPLOADER_KINDS = ["STAFF", "PLATFORM_ADMIN"] as const;
+export type BoardAttachUploaderKind = (typeof BOARD_ATTACH_UPLOADER_KINDS)[number];
+
+/**
+ * 어느 답글에 첨부할 수 있는가(2층 답글 단위). 직원(STAFF)은 TENANT 쪽 답글에만, 플랫폼 운영자(PLATFORM_ADMIN)는
+ * 자기(PLATFORM) 답글에만. 플랫폼 운영자의 범위는 본인 답글 단위뿐이며 직원 글·답글에는 붙일 수 없다.
+ * 운영사 상태(LIMITED 허용, CLOSED 거부)와 삭제·열람 권한은 앱이 판정한다.
+ */
+export function canAttachToReply(uploaderKind: BoardAttachUploaderKind, replySide: "TENANT" | "PLATFORM"): boolean {
+  return (
+    (uploaderKind === "STAFF" && replySide === "TENANT") ||
+    (uploaderKind === "PLATFORM_ADMIN" && replySide === "PLATFORM")
+  );
+}
+
 export type AttachFormat = "jpeg" | "png" | "webp" | "pdf" | "text";
 
 export type AttachCheck =
