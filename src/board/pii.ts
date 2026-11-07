@@ -8,7 +8,9 @@ export type PiiKind = "RESIDENT_ID" | "PHONE" | "ACCOUNT" | "EMAIL";
 const RESIDENT_ID = /(?<!\d)\d{6}[- ]\d{7}(?!\d)/g;
 const PHONE = /(?<!\d)(?:\+82[- .]?)?0?(?:1[016789][- .]?\d{3,4}[- .]?\d{4}|(?:2|[3-6][1-5])[- .]?\d{3,4}[- .]?\d{4})(?!\d)/g;
 const ACCOUNT = /(?<!\d)\d{2,6}(?:-\d{2,8}){1,3}(?!\d)/g;
-const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
+// 로컬 파트는 64자(RFC 상한)로 묶는다. 무제한 `+` 는 `@` 없는 긴 입력에서 시작점마다 끝까지 훑어 이차 시간이 된다(보안 점검 3-1).
+// 「포함 여부」 판정은 같다: 긴 로컬 파트도 끝 64자만으로 같은 `@` 에서 걸린다.
+const EMAIL = /[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
 
 function digitCount(s: string): number {
   return s.replace(/\D/g, "").length;
