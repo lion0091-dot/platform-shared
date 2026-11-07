@@ -130,6 +130,11 @@ export function canTransition(
     return from === "NEED_INFO" && to === "RECEIVED";
   }
 
+  // 실패 시 닫힘: TENANT·PLATFORM 이외 값(오타·소문자·널)을 플랫폼 권한으로 취급하지 않는다(보안 점검 3-2).
+  if (actorSide !== "PLATFORM") {
+    return false;
+  }
+
   if (from === "RECEIVED") {
     return to === "IN_PROGRESS" || to === "NEED_INFO" || to === "DONE" || to === "DECLINED";
   }

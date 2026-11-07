@@ -1,4 +1,7 @@
 import { createHmac, randomUUID } from "node:crypto";
+import { assertSignSecret, signNowSec, signTtl } from "./guard";
+
+const RESERVED_FIELDS: ReadonlySet<string> = new Set(["system", "action", "ext_tenant", "jti", "iat", "exp"]);
 
 /**
  * account 서버 호출(정지·해제·접근 모드·보류 읽기·대표 이전)의 서명과 본문 만들기 — 약속: account 저장소 docs/contract/integration-contract.md.
@@ -28,13 +31,22 @@ export interface SignedCallDeps {
 
 /** 서명된 호출: 본문(그대로 보낼 문자열)과 x-signature 값. iat=now, exp=now+ttl(최대 60초), 재시도마다 새 jti. */
 export function buildSignedCall(secret: string, input: SignedCallInput, deps: SignedCallDeps = {}): { body: string; signature: string } {
-  const iat = Math.floor((deps.now ?? Date.now()) / 1000);
-  const ttl = Math.min(deps.ttl ?? 60, 60);
+  assertSignSecret(secret);
+
+  const iat = signNowSec(deps.now);
+  const ttl = signTtl(deps.ttl);
+  const fields = input.fields ?? {};
+
+  // 서명되는 본문의 뼈대 키는 fields 로 덮어쓸 수 없다(보안 점검 2-2). 조용히 바뀐 본문이 서명되는 것을 막는다.
+  for (const k of Object.keys(fields)) {
+    if (RESERVED_FIELDS.has(k)) throw new Error(`CALL_RESERVED_FIELD: fields 에 예약 키(${k})를 넣을 수 없다.`);
+  }
+
   const body = JSON.stringify({
     system: input.system,
     action: input.action,
     ext_tenant: input.extTenant,
-    ...(input.fields ?? {}),
+    ...fields,
     jti: deps.jti ?? randomUUID(),
     iat,
     exp: iat + ttl,

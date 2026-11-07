@@ -1,4 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
+import { assertSignSecret, signNowSec, signTtl } from "./guard";
 
 /**
  * account SSO 토큰(JWT HS256, 60초, 일회용 jti) 만들기 — 약속: account 저장소 docs/contract/integration-contract.md §3.
@@ -32,14 +33,47 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** 들어갈 경로를 /ledger 아래 내부 경로로 제한한다(아니면 /ledger). account 쪽에서도 같은 검증을 한다. */
 export function ssoTarget(to: unknown): string {
-  if (typeof to !== "string" || !to.startsWith("/ledger") || to.startsWith("//") || to.includes("\\") || /[\r\n]/.test(to)) return "/ledger";
+  if (typeof to !== "string" || !to.startsWith("/ledger") || to.startsWith("//") || to.includes("\\") || /[\u0000-\u001f\u007f]/.test(to)) return "/ledger";
   if (to !== "/ledger" && !to.startsWith("/ledger/") && !to.startsWith("/ledger?")) return "/ledger";
+  if (!isCleanPath(to.split(/[?#]/, 1)[0])) return "/ledger";
 
   return to;
 }
 
+/**
+ * 경로 구간 검사(보안 점검 2-1): `.`·`..` 구간(퍼센트 인코딩·이중 인코딩 포함), 인코딩된 `/`·`\`·제어문자, 깨진 퍼센트 인코딩이 있으면 거짓.
+ * `/ledger/../admin` 처럼 접두만 맞고 브라우저가 정규화하면 다른 경로가 되는 값을 막는다. 쿼리는 검사하지 않는다(경로가 아니다).
+ */
+function isCleanPath(path: string): boolean {
+  for (const segment of path.split("/")) {
+    let s = segment;
+
+    for (let i = 0; i < 3; i++) {
+      let decoded: string;
+
+      try {
+        decoded = decodeURIComponent(s);
+      } catch {
+        return false;
+      }
+
+      if (decoded === s) break;
+
+      s = decoded;
+    }
+
+    // 최대 3 번 풀어도 인코딩된 점·구분자(%2e·%2f·%5c·%00)가 남아 있는 구간(이중·삼중 인코딩)은 거부한다.
+    if (s === "." || s === ".." || /[\/\\\u0000-\u001f\u007f]/.test(s) || /%(?:2e|2f|5c|00)/i.test(s)) return false;
+  }
+
+  return true;
+}
+
 export function signSsoToken(secret: string, input: SsoClaimsInput, deps: { now?: number; jti?: string; ttl?: number } = {}): string {
-  const iat = Math.floor((deps.now ?? Date.now()) / 1000);
+  assertSignSecret(secret);
+
+  const iat = signNowSec(deps.now);
+  const ttl = signTtl(deps.ttl);
   const hasAccess = input.access === "normal" || input.access === "read_only";
   const head = b64(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const body = b64(
@@ -52,7 +86,7 @@ export function signSsoToken(secret: string, input: SsoClaimsInput, deps: { now?
       name: input.name.trim().slice(0, 100),
       jti: deps.jti ?? randomUUID(),
       iat,
-      exp: iat + Math.min(deps.ttl ?? 60, 60),
+      exp: iat + ttl,
       ...(hasAccess ? { access: input.access } : {}),
       ...(hasAccess && Number.isSafeInteger(input.accessSeq) && (input.accessSeq as number) >= 1 ? { access_seq: input.accessSeq } : {}),
       ...(input.to !== undefined ? { to: ssoTarget(input.to) } : {}),
