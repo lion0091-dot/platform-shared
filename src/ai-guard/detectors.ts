@@ -127,6 +127,7 @@ const PHONE_INTL_RE = /\+82[-. ]?\(?0?\d{1,2}\)?[-. ]?\d{3,4}[-. ]?\d{4}/g;
 const PHONE_82_RE = /82[-. ]?0?1\d[-. ]?\d{3,4}[-. ]?\d{4}/g;
 const PHONE_DOMESTIC_RE = /\(?0(?:1[016789]|2|[3-6][1-5]|70|80|50\d?|60)\)?[-. ]?\d{3,4}[-. ]?\d{4}/g;
 const PHONE_REP_RE = /1[5-9]\d{2}[-. ]?\d{4}/g;
+const REP_CUE_RE = /(?:전화|대표|문의|연락|상담|고객센터|콜센터|tel|TEL|Tel|☎) {0,2}(?:번호)? {0,2}:? {0,2}$/;
 const BIZNO_RE = /\d{3}[- ]?\d{2}[- ]?\d{5}/g;
 const ACCOUNT_CHAIN_RE = /\d{2,6}(?:-\d{2,8}){1,3}/g;
 const PLATE_RE = /\d{2,3} ?[가나다라마바사아자하허호거너더러머버서어저고노도로모보소오조구누두루무부수우주배] ?\d{4}/g;
@@ -174,16 +175,21 @@ export function detectPhone(text: string, out: Candidate[]): void {
   scan(PHONE_INTL_RE, text, ok, out, mk);
   scan(PHONE_82_RE, text, ok, out, mk);
   scan(PHONE_DOMESTIC_RE, text, ok, out, mk);
+  // 대표번호(15xx~19xx): 8자리 금액·코드와 구분이 안 되므로 «구분자가 있거나, 앞에 전화 단서가 있을 때만» 전화로 본다.
+  // 대표번호는 개인정보가 아니므로 구분자·단서 없는 붙여 쓴 8자리를 놓치는 쪽(공개 번호 미가림)을 택한다.
   scan(
     PHONE_REP_RE,
     text,
     (m, s, e) => {
       if (!digitBoundary(text, s, e)) return false;
+      const b = text[s - 1];
+      if (b !== undefined && /[A-Za-z0-9_]/.test(b)) return false; // A15001234 같은 코드
       let i = e;
       while (i < e + 3 && text[i] === " ") i++;
       const unit = text[i];
       if (unit === "원" || unit === "만" || unit === "천" || unit === "억") return false;
-      return !(m[0].length === 8 && (text[s - 1] === "," || text[s - 1] === "."));
+      if (/[-. ]/.test(m[0])) return true; // 1588-1234 처럼 구분자가 있는 모양
+      return REP_CUE_RE.test(text.slice(Math.max(0, s - 12), s)); // 전화 15881234
     },
     out,
     mk,

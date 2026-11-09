@@ -1,4 +1,5 @@
 export { guard, isSafePayload, reasonCodes } from "./guard";
+export { TOKEN_PREFIX as GUARD_TOKEN_PREFIX } from "./policy";
 export {
   GUARD_KINDS,
   GUARD_REASONS,

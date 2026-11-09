@@ -3,6 +3,7 @@ import pii from "../board/__vectors__/pii.json";
 import {
   GUARD_KINDS,
   GUARD_REASONS,
+  GUARD_TOKEN_PREFIX,
   guard,
   isSafePayload,
   reasonCodes,
@@ -605,6 +606,84 @@ describe("추가 경계", () => {
 
   it("전송본은 L1 정규화본이다(제로폭 제거·전각 반각)", () => {
     expect(okText(guard("ＡＢＣ​ 5톤", p()))).toBe("ABC 5톤");
+  });
+});
+
+describe("이음 대조: 대표번호 8자리 금액 과가림 구멍", () => {
+  const keep = [
+    "운임 15000000원", // 이음 현행 규칙은 과가림(확인됨)
+    "15000000원 20박스",
+    "운임15000000",
+    "차량15001234",
+    "1,500,000원",
+    "25000000원",
+    "15만원",
+    "20261115",
+    "A15001234",
+  ];
+  it("금액·코드로 읽히는 8자리는 전화로 가리지 않는다(과가림 4 + 정상 5)", () => {
+    for (const t of keep) expect(okText(guard(t, p())), t).toBe(t);
+  });
+
+  it("대표번호는 구분자가 있거나 앞에 전화 단서가 있을 때 가린다", () => {
+    for (const t of ["대표번호 1588-1234", "문의 1588 1234", "1544.1234 로 연락", "전화 15881234", "전화번호: 15881234", "고객센터 16001234", "TEL 19771234"]) {
+      expect(okText(guard(t, p())), t).toMatch(/\[PHONE_1\]/);
+    }
+  });
+
+  it("지역번호·휴대폰 허용 목록(010~019 유효분, 02, 031~064, 070, 050x, 060, 080)", () => {
+    const mobile = ["010", "011", "016", "017", "018", "019"];
+    const area = ["02", "031", "032", "033", "041", "042", "043", "044", "051", "052", "053", "054", "055", "061", "062", "063", "064", "070", "080", "060", "0502", "0505"];
+    for (const m of mobile) expect(okText(guard(`연락 ${m}-1234-5678`, p())), m).toBe("연락 [PHONE_1]");
+    for (const a of area) {
+      const mid = a === "02" ? "123" : "123";
+      expect(okText(guard(`연락 ${a}-${mid}-4567`, p())), a).toBe("연락 [PHONE_1]");
+    }
+  });
+});
+
+describe("겹친 스팬 병합과 토큰 접두 (이음 질의)", () => {
+  it("주소 스팬이 전화 숫자열을 감싸면 전체가 PHONE 토큰이 된다(합집합·우선순위)", () => {
+    const text = `상차 대치동 123-4 전화 ${PHONE} 건물`;
+    const r = guard(text, p({ restoreKinds: ["ADDRESS"], extraDetectors: [(t) => (t.includes("대치동") ? [{ kind: "ADDRESS" as const, start: t.indexOf("대치동"), end: t.length }] : [])] }));
+    if (!r.ok) throw new Error("ok expected");
+    expect(r.payload.value).toBe("상차 [PHONE_1]");
+    expect(r.restore("[PHONE_1]").text).toBe("[PHONE_1]"); // ADDRESS 만 복원 → 복원 안 됨
+  });
+
+  it("앱 감지기가 전화 숫자열을 비워 두면 주소·전화가 따로 토큰이 된다", () => {
+    const text = `상차 대치동 123-4 전화 ${PHONE} 건물`;
+    const d = (t: string) => {
+      const a = t.indexOf("대치동");
+      const b = t.indexOf("전화");
+      return a < 0 || b < 0 ? [] : [{ kind: "ADDRESS" as const, start: a, end: b - 1 }];
+    };
+    const r = guard(text, p({ restoreKinds: ["ADDRESS"], extraDetectors: [d] }));
+    if (!r.ok) throw new Error("ok expected");
+    expect(r.payload.value).toBe("상차 [ADDR_1] 전화 [PHONE_1] 건물");
+    expect(r.restore("[ADDR_1]").text).toBe("대치동 123-4");
+  });
+
+  it("종류 이름과 토큰 접두 대응표", () => {
+    expect(GUARD_TOKEN_PREFIX).toEqual({
+      RESIDENT_ID: "RRN",
+      BIZNO: "BIZ",
+      PHONE: "PHONE",
+      ACCOUNT: "ACCT",
+      EMAIL: "EMAIL",
+      CARD: "CARD",
+      ORG: "ORG",
+      PERSON: "PERSON",
+      ADDRESS: "ADDR",
+      PLATE: "PLATE",
+      SECRET_LIKE: "SECRET",
+      KNOWN: "KNOWN",
+    });
+    for (const k of GUARD_KINDS) expect(GUARD_TOKEN_PREFIX[k]).toMatch(/^[A-Z]+$/);
+  });
+
+  it("앞뒤 [URL] 같은 앱 자체 표지는 토큰 모양이 아니라 건드리지 않는다", () => {
+    expect(okText(guard("참고 [URL] 확인", p()))).toBe("참고 [URL] 확인");
   });
 });
 
