@@ -2,6 +2,17 @@
 
 `@platform/shared/payments`·`@platform/shared/secrets` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
+## 미출시 — ai-guard 서브패스 (신규, 코어)
+
+`@platform/shared/ai-guard` 추가(기존 API 변경 없음, 의존성 0, package.json 버전 미변경). 외부 AI 전송 전 개인정보 검사·가림. 순수 함수 `guard(input, policy)` 하나가 가린 결과를 돌려준다.
+- 필드 허용(경로·text/enum/number/boolean), 선언 밖 키 `DROP`/`BLOCK`(기본 BLOCK, 키 이름은 기록하지 않음).
+- 패턴: 주민(외국인)등록번호·사업자번호(체크섬)·전화(대표번호 포함)·계좌(하이픈 유/무)·이메일·카드(Luhn)·차량번호(기본 OFF)·키 모양 문자열(항상 차단). 날짜·금액·소수는 오탐 제외.
+- 이름·상호 표지(보수적·의심 스팬), 앱 사전 `knownTerms` 정확 일치, `extraOrgMarkers`/`extraPersonCues`, 동기 `extraDetectors`(스팬만, 합집합만, 실패=차단).
+- 종류별 처리 `kinds`: MASK/BLOCK/PASS/OFF (주민·카드·계좌·키 모양은 PASS/OFF 불가). `level`: STRICT(의심=차단)/STANDARD(의심=가림 후 재검사).
+- 토큰 치환 `[KIND_n]`, `restore()`(`restoreKinds` 필수, 모르는 토큰·비복원 토큰 분리 보고), 토큰 모양 충돌 `ESCAPE`/`BLOCK`.
+- fail-closed: 절대 throw 안 함, 길이·치환 수 상한, 치환 결과 재검사(post-check, 앱 감지기 포함), 리포트·오류에 원문 없음. `reasonCodes()`, `GUARD_KINDS`/`GUARD_REASONS`.
+- 확장(guardBatch·narrowPolicy·normalizeOrgName·scan·restoreDeep·AMOUNT·tags·guardAsync)은 포함하지 않음. 설계: 로컬 문서(공개 저장소 미반영).
+
 ## v0.4.0-rc.3 — 보안 수정 (account 서명·SSO 입력 검증, board 실패 시 닫힘·이메일 감지 시간 상한)
 
 공개 API 이름·시그니처 변경 없음. 정상 입력의 동작은 그대로이고, 아래 잘못된 입력은 이제 오류로 거부되거나 닫힘으로 처리된다(동작 변경).

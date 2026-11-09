@@ -11,7 +11,8 @@
     "./payments": "./src/payments/index.ts",
     "./secrets": "./src/secrets/index.ts",
     "./inapp": "./src/inapp/index.ts",
-    "./board": "./src/board/index.ts"
+    "./board": "./src/board/index.ts",
+    "./ai-guard": "./src/ai-guard/index.ts"
   },
   "files": ["src"],
   "scripts": {
