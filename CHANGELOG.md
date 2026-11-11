@@ -2,6 +2,16 @@
 
 `@platform/shared/payments`·`@platform/shared/secrets` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
+## v0.4.0-rc.3 — 보안 수정 (account 서명·SSO 입력 검증, board 실패 시 닫힘·이메일 감지 시간 상한)
+
+공개 API 이름·시그니처 변경 없음. 정상 입력의 동작은 그대로이고, 아래 잘못된 입력은 이제 오류로 거부되거나 닫힘으로 처리된다(동작 변경).
+- `buildSignedCall`: `fields` 에 예약 키(`system`·`action`·`ext_tenant`·`jti`·`iat`·`exp`)가 있으면 `CALL_RESERVED_FIELD` 오류. 빈 비밀·문자열이 아닌 비밀은 `SIGN_SECRET_INVALID`, 유한한 양수가 아닌 `ttl` 은 `SIGN_TTL_INVALID`, 유한하지 않은 `now` 는 `SIGN_NOW_INVALID`. `ttl` 은 여전히 최대 60초로 줄인다.
+- `signSsoToken`: 같은 비밀·`ttl`·`now` 검증. `ssoTarget` 은 `/ledger` 아래에서 `.`·`..` 구간(퍼센트 인코딩·이중 인코딩 포함), 인코딩된 구분자, 제어문자, 깨진 퍼센트 인코딩이 있으면 `/ledger` 로 되돌린다.
+- `canTransition`: `actorSide` 가 `PLATFORM` 이 아닌 알 수 없는 값(오타·소문자·널)은 플랫폼 권한으로 취급하지 않고 거부(실패 시 닫힘).
+- `detectPii` 이메일 패턴: 로컬 파트를 64자로 묶어 `@` 없는 긴 입력에서의 이차 시간을 막음. 「포함 여부」 판정 결과는 같다.
+- 문서만: `docs/design-two-tier-board-shared-2026-11.md` 공개용 정리(내부 식별자·약점 메모·운영 절차 제거).
+- 소비 앱: 위 거부 동작이 영향을 줄 수 있는 호출(예약 키를 fields 로 넘김, 빈 비밀·잘못된 ttl/now, 비정상 `to`, 알 수 없는 `actorSide`)이 없는지 핀을 올릴 때 각 앱이 시험으로 확인한다.
+
 ## v0.4.0-rc.2 — board: 2층 승격은 직원 전원
 
 `board_contract_version` v1 유지(값·코드 이름 변경 없음, 권한 규칙만 완화).
