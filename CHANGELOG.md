@@ -2,9 +2,9 @@
 
 `@platform/shared/payments`·`@platform/shared/secrets` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
-## 미출시 — ai-guard 서브패스 (신규, 코어)
+## v0.4.0-rc.4 — ai-guard 서브패스 (신규, 코어)
 
-`@platform/shared/ai-guard` 추가(기존 API 변경 없음, 의존성 0, package.json 버전 미변경). 외부 AI 전송 전 개인정보 검사·가림. 순수 함수 `guard(input, policy)` 하나가 가린 결과를 돌려준다.
+`@platform/shared/ai-guard` 추가(기존 API 변경 없음, 의존성 0). 외부 AI 전송 전 개인정보 검사·가림. 순수 함수 `guard(input, policy)` 하나가 가린 결과를 돌려준다.
 - 필드 허용(경로·text/enum/number/boolean), 선언 밖 키 `DROP`/`BLOCK`(기본 BLOCK, 키 이름은 기록하지 않음).
 - 패턴: 주민(외국인)등록번호·사업자번호(체크섬)·전화(대표번호 포함)·계좌(하이픈 유/무)·이메일·카드(Luhn)·차량번호(기본 OFF)·키 모양 문자열(항상 차단). 날짜·금액·소수는 오탐 제외.
 - 이름·상호 표지(보수적·의심 스팬), 앱 사전 `knownTerms` 정확 일치, `extraOrgMarkers`/`extraPersonCues`, 동기 `extraDetectors`(스팬만, 합집합만, 실패=차단).
