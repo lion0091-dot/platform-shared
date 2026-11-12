@@ -6,6 +6,7 @@ import {
   type ExtraDetector,
   type FieldSpec,
   type GuardKind,
+  type GuardLevel,
   type GuardPolicy,
   type KindMode,
 } from "./types";
@@ -51,8 +52,17 @@ export interface Term {
   key: string;
 }
 
+/** 컴파일 시점에 복사해 얼린 정책 값(보강 ⑤). 정책 객체를 나중에 바꿔도 이미 컴파일된 규칙은 달라지지 않는다. */
+export interface PolicySnapshot {
+  readonly policyId: string;
+  readonly level: GuardLevel;
+  readonly maxCharsPerField: number;
+  readonly maxCharsTotal: number;
+  readonly maxReplacements: number;
+}
+
 export interface Compiled {
-  policy: GuardPolicy;
+  policy: PolicySnapshot;
   modes: Record<GuardKind, KindMode>;
   restorable: ReadonlySet<GuardKind>;
   fieldMap: ReadonlyMap<string, FieldSpec>;
@@ -178,14 +188,21 @@ export function compilePolicy(policy: unknown): Compiled {
   }
   for (const list of termIndex.values()) list.sort((a, b) => b.norm.length - a.norm.length);
 
-  const extra = p.extraDetectors ?? [];
-  if (!Array.isArray(extra) || extra.length > LIMITS.maxDetectors || extra.some((d) => typeof d !== "function")) fail("extraDetectors");
+  const extraRaw = p.extraDetectors ?? [];
+  if (!Array.isArray(extraRaw) || extraRaw.length > LIMITS.maxDetectors || extraRaw.some((d) => typeof d !== "function")) fail("extraDetectors");
+  const extra: readonly ExtraDetector[] = Object.freeze([...extraRaw]); // 배열을 복사해 호출자가 나중에 push/교체해도 영향 없음
 
   const markers = compileMarkers(strList(p.extraOrgMarkers, "extraOrgMarkers"), strList(p.extraPersonCues, "extraPersonCues"));
 
   const c: Compiled = {
-    policy: p,
-    modes,
+    policy: Object.freeze({
+      policyId: p.policyId,
+      level: p.level,
+      maxCharsPerField: p.maxCharsPerField,
+      maxCharsTotal: p.maxCharsTotal,
+      maxReplacements: p.maxReplacements,
+    }),
+    modes: Object.freeze({ ...modes }) as Record<GuardKind, KindMode>,
     restorable,
     fieldMap,
     unknownKeys: p.unknownKeys ?? "BLOCK",
@@ -202,18 +219,19 @@ function validateSpec(spec: unknown, perField: number): FieldSpec {
   if (typeof spec !== "object" || spec === null) fail("spec");
   const s = spec as FieldSpec;
   switch (s.type) {
+    // 모든 명세는 복사해 얼린다(보강 ⑤): 컴파일 뒤 원본 명세(enum 값 배열 등)를 바꿔도 허용 범위가 달라지지 않는다.
     case "text":
       if (s.maxChars !== undefined && !isPosInt(s.maxChars, perField)) fail("spec-text");
-      return s;
+      return Object.freeze(s.maxChars !== undefined ? { type: "text" as const, maxChars: s.maxChars } : { type: "text" as const });
     case "enum":
       if (!Array.isArray(s.values) || s.values.length < 1 || s.values.length > 100) fail("spec-enum");
       for (const v of s.values) if (typeof v !== "string" || v.length > 64) fail("spec-enum");
-      return s;
+      return Object.freeze({ type: "enum" as const, values: Object.freeze([...s.values]) });
     case "number":
       if (!Number.isFinite(s.min) || !Number.isFinite(s.max) || s.min > s.max) fail("spec-number");
-      return s;
+      return Object.freeze({ type: "number" as const, min: s.min, max: s.max, ...(s.integer === true ? { integer: true } : {}) });
     case "boolean":
-      return s;
+      return Object.freeze({ type: "boolean" as const });
     default:
       return fail("spec-type");
   }

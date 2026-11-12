@@ -1,4 +1,5 @@
 import {
+  countAddressCues,
   detectAccountAndRuns,
   detectBizno,
   detectCard,
@@ -20,6 +21,7 @@ import {
   type GuardReason,
   type GuardReport,
   type GuardResult,
+  type GuardWarning,
   type RestoreResult,
   type SafePayload,
 } from "./types";
@@ -71,6 +73,7 @@ interface State {
   policyId: string;
   counts: Partial<Record<GuardKind, number>>;
   passed: Partial<Record<GuardKind, number>>;
+  warnings: Partial<Record<GuardWarning, number>>;
   fields: Set<string>;
   dropped: number;
   charsIn: number;
@@ -86,6 +89,7 @@ function newState(): State {
     policyId: "invalid",
     counts: {},
     passed: {},
+    warnings: {},
     fields: new Set(),
     dropped: 0,
     charsIn: 0,
@@ -107,6 +111,7 @@ function report(st: State, ok: boolean): GuardReport {
     droppedCount: st.dropped,
     charsIn: st.charsIn,
     charsOut: ok ? st.charsOut : 0,
+    ...(Object.keys(st.warnings).length > 0 ? { warnings: { ...st.warnings } } : {}),
   };
 }
 
@@ -297,6 +302,8 @@ interface Group {
   kind: GuardKind;
   suspect: boolean;
   members: number;
+  /** 이 그룹에 합쳐진 모든 후보의 종류(처리 방식 합치기용). */
+  kinds: Set<GuardKind>;
   key?: string;
 }
 
@@ -353,13 +360,19 @@ function collect(text: string, c: Compiled): Candidate[] {
   return out;
 }
 
+const STRENGTH: Readonly<Record<string, number>> = { OFF: -1, PASS: 0, MASK: 1, BLOCK: 2 };
+
 function classify(cands: Candidate[], c: Compiled): Group[] {
   // 번호류 후보가 더 강한 번호(주민·카드·전화·이메일) 안에 완전히 들어 있으면 버린다(같은 번호의 이중 해석).
   const strong = cands.filter((x) => x.kind === "RESIDENT_ID" || x.kind === "CARD" || x.kind === "PHONE" || x.kind === "EMAIL");
-  const kept =
-    strong.length === 0
-      ? cands
-      : cands.filter((x) => !((x.kind === "ACCOUNT" || x.kind === "BIZNO") && strong.some((s) => s.start <= x.start && x.end <= s.end)));
+  const biz = cands.filter((x) => x.kind === "BIZNO"); // 검증식을 통과한 사업자번호 모양은 계좌로 다시 해석하지 않는다
+  const kept = cands.filter((x) => {
+    if (x.kind === "ACCOUNT" || x.kind === "BIZNO") {
+      if (strong.some((s) => s.start <= x.start && x.end <= s.end)) return false;
+    }
+    if (x.kind === "ACCOUNT" && biz.some((s) => s.start <= x.start && x.end <= s.end)) return false;
+    return true;
+  });
   kept.sort((a, b) => a.start - b.start || b.end - a.end);
 
   const groups: Group[] = [];
@@ -368,15 +381,32 @@ function classify(cands: Candidate[], c: Compiled): Group[] {
     if (g && x.start < g.end) {
       g.end = Math.max(g.end, x.end);
       if (RANK[x.kind] < RANK[g.kind]) g.kind = x.kind;
+      g.kinds.add(x.kind);
       g.suspect = g.suspect && x.suspect;
       g.members++;
       delete g.key;
     } else {
-      groups.push({ start: x.start, end: x.end, kind: x.kind, suspect: x.suspect, members: 1, ...(x.key ? { key: x.key } : {}) });
+      groups.push({ start: x.start, end: x.end, kind: x.kind, suspect: x.suspect, members: 1, kinds: new Set([x.kind]), ...(x.key ? { key: x.key } : {}) });
     }
   }
-  // 합친 뒤 최종 종류가 OFF 인 것은 버린다(OFF=탐지 안 함). 흡수 역할은 위에서 끝났다.
-  return groups.filter((g) => c.modes[g.kind] !== "OFF");
+  // 합친 그룹의 처리 방식은 «가장 엄격한 구성원» 을 따른다(BLOCK > MASK > PASS, OFF 는 무시).
+  // 우선순위가 높은 종류가 PASS/OFF 여도 같은 구간에 있는 MASK·BLOCK 종류가 누락되지 않게 한다. 종류 이름은 가장 엄격한 쪽 중 우선순위가 가장 높은 것.
+  const out: Group[] = [];
+  for (const g of groups) {
+    let best: GuardKind | null = null;
+    let bestStrength = -1;
+    for (const k of g.kinds) {
+      const st = k === "SECRET_LIKE" ? STRENGTH.BLOCK! : STRENGTH[c.modes[k]]!;
+      if (st > bestStrength || (st === bestStrength && best !== null && RANK[k] < RANK[best])) {
+        best = k;
+        bestStrength = st;
+      }
+    }
+    if (best === null || bestStrength < 0) continue; // 구성원이 전부 OFF: 탐지 안 함(흡수 역할은 위에서 끝남)
+    g.kind = best;
+    out.push(g);
+  }
+  return out;
 }
 
 function effectiveMode(g: Group, c: Compiled): "MASK" | "BLOCK" | "PASS" {
@@ -404,6 +434,9 @@ function processText(raw: string, c: Compiled, st: State): string {
     if (c.collision === "BLOCK") throw new Block("TOKEN_COLLISION");
     text = text.replace(TOKEN_RE, (m) => "［" + m.slice(1));
   }
+
+  const cues = countAddressCues(text); // 주소는 가리지 않고 단서어 경고만(보강 ①)
+  if (cues > 0) st.warnings.ADDRESS_CUE = (st.warnings.ADDRESS_CUE ?? 0) + cues;
 
   const groups = classify(collect(text, c), c);
   const blocked = new Set<GuardKind>();

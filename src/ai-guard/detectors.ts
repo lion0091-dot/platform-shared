@@ -255,12 +255,47 @@ const ORG_SUFFIX_RE = new RegExp(`([가-힣A-Za-z0-9]{1,20}) {0,2}${CORP_SUFFIX}
 
 /** 기본 상호 접미어(일반 명사와 겹치는 식품·건설·물류 등은 넣지 않는다 — 앱이 extraOrgMarkers 로 더한다). */
 export const DEFAULT_ORG_MARKERS: readonly string[] = ["상사", "상회", "물산", "실업", "무역", "산업"];
-export const DEFAULT_PERSON_CUES: readonly string[] = ["받는분", "받는 분", "받는사람", "수취인", "인수자", "담당자", "담당", "보내는분", "보내는 분", "성함", "이름"];
+export const DEFAULT_PERSON_CUES: readonly string[] = [
+  "받는분",
+  "받는 분",
+  "받는사람",
+  "수취인",
+  "인수자",
+  "담당자",
+  "담당",
+  "보내는분",
+  "보내는 분",
+  "성함",
+  "이름",
+  // 상담·접수 문맥(보강 ③): 자유 문장 저장 모듈(free-text)과 공유하는 상수
+  "고객명",
+  "신청자",
+  "가입자",
+  "예금주",
+];
+
+/** 주소 단서어(보강 ①). 주소를 자동으로 가리지는 않고, 단서 뒤에 내용이 이어지면 «경고» 건수만 센다. */
+export const DEFAULT_ADDRESS_CUES: readonly string[] = ["상세주소", "배송지", "도로명", "동호수", "호수", "번지", "주소"];
+
+/** 주소 단서 정규식(기본 + 앱 추가분). 메타문자는 이스케이프한다. */
+export function compileAddressCues(extra: readonly string[] = []): RegExp {
+  const cues = [...DEFAULT_ADDRESS_CUES, ...extra].sort((a, b) => b.length - a.length).map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp(`(?:${cues.join("|")}) {0,2}(?:은|는|이|가|:)? {0,2}[가-힣0-9]{2}`, "g");
+}
+
+const ADDRESS_CUE_RE = compileAddressCues();
+export function countAddressCues(text: string, re: RegExp = ADDRESS_CUE_RE): number {
+  let n = 0;
+  for (const _ of matches(re, text)) n++;
+  return n;
+}
 const TITLES: readonly string[] = ["대표님", "사장님", "과장님", "부장님", "차장님", "팀장님", "실장님", "이사님", "선생님", "대표", "사장", "과장", "부장", "차장", "팀장", "실장", "이사", "님"];
 const PARTICLES: readonly string[] = ["입니다", "이다", "이며", "이고", "께서", "에서", "으로", "에게", "한테", "은", "는", "이", "가", "을", "를", "의", "에", "로", "와", "과", "도", "만", "께"];
 const NAME_STOP: ReadonlySet<string> = new Set([
   "업무", "부서", "직원", "기사", "차량", "배송", "운송", "확인", "문의", "연락", "요청", "사항", "관련", "배차", "업체", "거래처", "고객", "회원", "본인", "없음", "미정", "동일", "같음",
   "사장", "대표", "과장", "부장", "차장", "팀장", "실장", "이사", "선생", "담당", "담당자", "판매자", "구매자", "사용자", "관리자", "운전", "운전기사", "배송기사", "화주", "여러분", "손님", "상담", "접수", "주문", "발송",
+  // 상담·접수 문맥 업무어(보강 ③): «고객명 변경 요청» 같은 문장을 이름으로 오인하지 않게
+  "변경", "수정", "정보", "조회", "등록", "취소", "삭제", "내용", "양식", "항목",
 ]);
 
 function esc(s: string): string {
@@ -296,16 +331,26 @@ export function detectOrgMarkers(text: string, mk: Markers, out: Candidate[]): v
   for (const m of matches(mk.orgWord, text)) push(m.index, m.index + m[1]!.length + m[2]!.length);
 }
 
-export function detectPersonCues(text: string, mk: Markers, out: Candidate[]): void {
+/** 단서어 «뒤» 이름 후보(성함 홍길동). */
+export function detectPersonCueBefore(text: string, mk: Markers, out: Candidate[]): void {
   for (const m of matches(mk.personBefore, text)) {
     const name = m[1]!;
     if (NAME_STOP.has(name)) continue;
     const e = m.index + m[0].length;
     out.push({ kind: "PERSON", start: e - name.length, end: e, suspect: true });
   }
+}
+
+/** 호칭 «앞» 이름 후보(홍길동님, 홍길동 씨). 오탐이 많아 자유 문장 저장 모듈은 기본으로 쓰지 않는다. */
+export function detectPersonTitleAfter(text: string, mk: Markers, out: Candidate[]): void {
   for (const m of matches(mk.personAfter, text)) {
     const name = m[1]!;
     if (NAME_STOP.has(name)) continue;
     out.push({ kind: "PERSON", start: m.index, end: m.index + name.length, suspect: true });
   }
+}
+
+export function detectPersonCues(text: string, mk: Markers, out: Candidate[]): void {
+  detectPersonCueBefore(text, mk, out);
+  detectPersonTitleAfter(text, mk, out);
 }

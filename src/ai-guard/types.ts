@@ -3,7 +3,11 @@
  * 설계: docs/design-ai-egress-guard-2026-11.md (로컬 초안). 실제 개인정보·키는 어디에도 없다.
  */
 
-export const GUARD_RULES_VERSION = "ai-guard-rules/1";
+/** 규칙을 바꾸면 올린다. /2: 숫자 옆 유니코드 대시·비ASCII 숫자 정규화, 이름 단서어 추가, 겹친 스팬의 처리 방식 합치기(가장 엄격한 쪽), 주소 단서 경고. */
+export const GUARD_RULES_VERSION = "ai-guard-rules/2";
+
+/** 가리지는 않지만 알려 주는 신호(닫힌 집합). 값·위치는 담지 않는다. */
+export type GuardWarning = "ADDRESS_CUE";
 
 export const GUARD_KINDS = [
   "RESIDENT_ID",
@@ -93,6 +97,8 @@ export interface GuardReport {
   readonly droppedCount: number;
   readonly charsIn: number;
   readonly charsOut: number;
+  /** 경고가 하나라도 있을 때만 존재(없으면 키 자체가 없다 — 기존 리포트 모양 유지). */
+  readonly warnings?: Readonly<Partial<Record<GuardWarning, number>>>;
 }
 
 declare const SAFE: unique symbol;
