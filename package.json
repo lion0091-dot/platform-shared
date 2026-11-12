@@ -13,6 +13,7 @@
     "./inapp": "./src/inapp/index.ts",
     "./board": "./src/board/index.ts",
     "./pii-display": "./src/pii-display/index.ts",
+    "./free-text": "./src/free-text/index.ts",
     "./ai-guard": "./src/ai-guard/index.ts",
     "./kst": "./src/kst/index.ts",
     "./kst/check": "./src/kst/check.mjs"
