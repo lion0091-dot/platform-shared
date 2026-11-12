@@ -2,6 +2,12 @@
 
 `@platform/shared/payments`·`@platform/shared/secrets` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
+## 미출시 — kst 서브패스 (신규)
+
+`@platform/shared/kst`(서울 날짜 헬퍼: 미트 `lib/time/kst.ts` 승격 + `kstDayRange`·`kstMonthRange`·`parseKstDate`)와 `@platform/shared/kst/check`(서울 날짜 규칙 정적 검사 CLI) 추가. 기존 API 변경 없음, 의존성 0.
+- **동작 주의 1 (미트 `kst.ts` 와 다름)**: `kstDateOf` 는 오프셋 없는 시각 문자열(`2026-11-11T23:30:00`, `2026-11-11 23:30:00`)을 **UTC 로 읽는다**. 원본은 실행 환경 시간대에 따라 결과가 갈렸다(개발 PC 와 UTC 서버가 다름). 오프셋이 있으면(`Z`·`+09`·`+09:00`) 그대로 따른다. DB 의 `timestamp without time zone` 을 서울 시각으로 쓰는 앱은 이 가정이 틀리므로 도입 때 확인한다.
+- **동작 주의 2 (검사기)**: `ts-iso-slice` 는 `toISOString().slice(0, 7)`(UTC 월)도 error 로 본다.
+
 ## v0.4.0-rc.4 — ai-guard 서브패스 (신규, 코어)
 
 `@platform/shared/ai-guard` 추가(기존 API 변경 없음, 의존성 0). 외부 AI 전송 전 개인정보 검사·가림. 순수 함수 `guard(input, policy)` 하나가 가린 결과를 돌려준다.
