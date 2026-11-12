@@ -14,6 +14,8 @@
 - `@platform/shared/inapp` — 카카오톡 인앱 브라우저 판별(`isKakaoInApp`)·외부 브라우저로 열기 주소(`kakaoExternalOpenUrl`)·경로 접두어 판정(`matchesPathPrefixes`). 순수 함수만 있고, 안내 화면과 경로 목록은 앱이 가진다.
 
 - `@platform/shared/board` — 이원화 게시판의 공용 계약(`board_contract_version` v1): 코드값(분류·상태·작성자 유형·답글 가시성)·가시 범위/답글/승격/전이 판정(`canView`·`canReply`·`canEscalate`·`canTransition`)·`detectPii`·`validateEscalation`·작성 제한과 허용 범위·안내 문구 상수·첨부 규칙 상수와 `validateAttachmentMeta`·감사 이벤트 코드와 2인 승인 요청 계약 상수. 순수 함수·상수만 있고 화면·표·RPC·알림·저장은 앱이 가진다. 계약 문서 `docs/board-contract.md`.
+- `@platform/shared/kst` — 서울(Asia/Seoul) 날짜 헬퍼. 업무 날짜는 서울 하나로 통일한다(서버·DB·CI 는 UTC). `kstToday`·`kstDateOf`·`kstDaysAgo`·`kstMonth`, 하루/월의 UTC 구간 `kstDayRange`·`kstMonthRange`(끝 미포함, timestamptz 비교용), `parseKstDate`, 서식 전용 `formatKstDate`. 날짜 계산은 +9시간 보정(Intl 비의존), 시계는 인자로 주입한다. 순수 함수, 의존성 0.
+- `@platform/shared/kst/check` — 서울 날짜 규칙 정적 검사(Node 내장만, CI 용). `node node_modules/@platform/shared/src/kst/check.mjs [--all | --changed-since origin/main] [--warn-only] [--json] [--config .kst-check.json]`. 기본은 기준 브랜치와 비교해 «바뀐 줄»만 검사하고(`fetch-depth: 0` 필요), `--all` 은 전수 점검용. 종료 코드 0 통과 / 1 error / 2 사용법·설정 오류. 허용은 같은 줄·윗줄 주석 `kst-ok: <규칙ID> <사유>`(사유 필수) 또는 `.kst-check.json` 의 `allow`(file·rule·match·reason 필수, `expires` 선택, 공백 무시 매칭). 정규식 휴리스틱이라 오탐은 허용 목록으로 처리한다. 규칙 목록은 `RULES` export.
 
 ## 쓰는 법(앱 쪽)
 1. `package.json`: `"@platform/shared": "github:lion0091-dot/platform-shared#v0.1.0"` (버전은 태그로 고정, 올릴 때 두 앱을 같이 올린다).
