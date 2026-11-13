@@ -14,6 +14,7 @@ export {
   type GuardReason,
   type GuardReport,
   type GuardResult,
+  type GuardWarning,
   type KindMode,
   type KnownTerm,
   type RestoreResult,
