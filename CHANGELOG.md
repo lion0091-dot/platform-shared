@@ -2,7 +2,17 @@
 
 `@platform/shared/payments`·`@platform/shared/secrets` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
-## 미출시 — kst 서브패스 (신규)
+## v0.4.0-rc.5 — 개인정보 공용 부품(pii-display·free-text), ai-guard 보강, kst 서브패스
+
+신규 서브패스는 모두 추가형이다(기존 API 변경 없음, 핀을 올리지 않으면 영향 없음). 이 버전에는 kst 서브패스(아래 «kst 서브패스» 항목)도 함께 실린다.
+- `@platform/shared/pii-display`(규칙 A): 구조화 필드의 기본 마스킹 표시·해제 판정·열람 기록 보조.
+- `@platform/shared/free-text`(규칙 B): `maskFreeText` 로 자유 문장 저장 전에 주민(외국인)등록번호·전화·카드·계좌·이메일·사업자번호·키 모양 문자열을 가림. 규칙 버전 `free-text-rules/1`. 실패(길이 초과 등)하면 원문을 돌려주지 않으므로 앱은 저장을 거부해야 한다.
+- **이름·주소는 가리지 않는다**: `maskFreeText` 는 이름·주소를 가리지 않고 경고 코드(`NAME_CUE`·`ADDRESS_CUE`, 건수만)만 돌려준다. 한글로 풀어 쓴 숫자도 경고만. 이름·주소가 자유 문장에 섞여 저장되지 않게 하는 것은 앱의 입력 안내·구조화 필드 몫이다.
+- ai-guard 보강 5건(`GUARD_RULES_VERSION` `ai-guard-rules/2`): 구분자 변형 탐지, 이름 단서어, 스팬 합치기, 정책 동결, 주소 단서 경고. **동작 주의**: 정책은 컴파일 시점에 복사·동결되어, 그 뒤 원본 정책 객체를 바꿔도 반영되지 않는다.
+- 문서: `docs/pii-access-log-sql-example.md`(열람 기록 SQL 예시).
+
+### kst 서브패스 (신규)
+
 
 `@platform/shared/kst`(서울 날짜 헬퍼: 미트 `lib/time/kst.ts` 승격 + `kstDayRange`·`kstMonthRange`·`parseKstDate`)와 `@platform/shared/kst/check`(서울 날짜 규칙 정적 검사 CLI) 추가. 기존 API 변경 없음, 의존성 0.
 - **동작 주의 1 (미트 `kst.ts` 와 다름)**: `kstDateOf` 는 오프셋 없는 시각 문자열(`2026-11-11T23:30:00`, `2026-11-11 23:30:00`)을 **UTC 로 읽는다**. 원본은 실행 환경 시간대에 따라 결과가 갈렸다(개발 PC 와 UTC 서버가 다름). 오프셋이 있으면(`Z`·`+09`·`+09:00`) 그대로 따른다. DB 의 `timestamp without time zone` 을 서울 시각으로 쓰는 앱은 이 가정이 틀리므로 도입 때 확인한다.
