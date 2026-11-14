@@ -16,7 +16,10 @@
     "./free-text": "./src/free-text/index.ts",
     "./ai-guard": "./src/ai-guard/index.ts",
     "./kst": "./src/kst/index.ts",
-    "./kst/check": "./src/kst/check.mjs"
+    "./kst/check": "./src/kst/check.mjs",
+    "./ai-shared-key": "./src/ai-shared-key/index.ts",
+    "./ai-shared-key/types": "./src/ai-shared-key/types.ts",
+    "./ai-shared-key/contract": "./src/ai-shared-key/contract.ts"
   },
   "files": ["src"],
   "scripts": {
