@@ -2,6 +2,15 @@
 
 `@platform/shared/payments`·`@platform/shared/secrets` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
+## 다음 rc (미배포) — ai-shared-key 서브패스 (신규)
+
+신규 서브패스 3개, 추가형(기존 API 변경 없음, 핀을 올리지 않으면 영향 없음). 설계: `docs/design-ai-shared-key-module-2026-11.md`.
+- `@platform/shared/ai-shared-key`(서버 전용): 공용 AI 키(방식 B)의 키 모양 검사·힌트·봉인·호출 직전 복호화(`withPlatformAiKey`)·예약·기록(`onRecorded` 훅, 2초 타임아웃·실패 격리)·401/403 무효 표시·관리 액션·`anthropicVerifier`·`createAiSharedKey` 팩토리.
+- `@platform/shared/ai-shared-key/types`(클라이언트 가능): 타입·예약 코드 6종·`filterAiRows`·`assertNoForbiddenKeys`·`estimateCostUsd`(항상 «추정»).
+- `@platform/shared/ai-shared-key/contract`: `checkRpcContract(sqlText, rpcNames?)` — 앱 마이그 SQL 을 RPC 계약 v1 과 정적 대조(DB 접속 없음).
+- **마스터 키 환경변수 이름은 기본값이 없다**(`masterKeyEnv` 필수, 앱별). 키·암호문·마스터 키 값은 이 저장소 어디에도 없다.
+- SQL 템플릿(`templates/`)과 레저코어 전환은 이번 범위가 아니다(후속).
+
 ## v0.4.0-rc.5 — 개인정보 공용 부품(pii-display·free-text), ai-guard 보강, kst 서브패스
 
 신규 서브패스는 모두 추가형이다(기존 API 변경 없음, 핀을 올리지 않으면 영향 없음). 이 버전에는 kst 서브패스(아래 «kst 서브패스» 항목)도 함께 실린다.
