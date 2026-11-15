@@ -2,6 +2,15 @@
 
 `@platform/shared/payments`·`@platform/shared/secrets` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
+## v0.4.0-rc.9 — ai-usage-tenant-line 서브패스 (신규), AccountCallAction 에 ai_usage_tenant
+
+추가형이다(기존 API 이름·시그니처 변경 없음, 핀을 올리지 않으면 영향 없음, 의존성 0). 이음·미트가 «테넌트(운영사·업체)별 월 AI 토큰» 한 줄을 레저코어로 **배치**로 보낼 때 두 앱이 똑같이 필요한 순수 계산 부분만 담는다. 호출(네트워크)·타임아웃·집계·크론·켜기·«어떤 테넌트를 보낼지»(변경분 + 하루 1회 전체)는 앱 몫이다. 계약: 레저코어 `docs/contract/ai-usage-tenant-line-contract-v1.md`(v1, 충돌 시 그 문서가 우선).
+- `@platform/shared/ai-usage-tenant-line`: `buildAiUsageTenantLine`(입력 키 허용 목록 7개 `extId·month·inputTokens·outputTokens·cacheTokens·calls·asOf`, 그 밖의 키(회사 이름·금액·사용자·모델·기능 등)는 `LINE_EXTRA_KEY`, `ext_id` 는 영문·숫자·밑줄·하이픈 1~100자, 서울 월·`as_of` 미래 5분·400일 검사, 던지지 않음)·`checkAiUsageTenantBatch`(배치 선검증: 1~50건·항목 키 8개 전부 필수·허용 키·범위·`(ext_id, month)` 중복 — 항목 하나라도 틀리면 수신이 배치 전체를 거부하므로 발신 전에 거른다)·`splitAiUsageTenantBatches`(50건·16KB 이하로 순서 유지 분할, 중복·허용 밖 키가 있으면 분할 전에 거부, 빈 목록은 빈 배치)·`buildAiUsageTenantCall`(봉투 7키 `system·action:"ai_usage_tenant"·ext_tenant:"BATCH"·jti·iat·exp·lines`, 계약 §5 본문 순서로 직접 직렬화, 본문 16KB 검사, 실패는 코드로)·`classifyAiUsageTenantResponse`(200 `{status:"OK",received,stored}` 만 성공, 나머지는 `classifyAiUsageResponse` 와 같은 분류)·상수.
+- `AccountCallAction` 타입에 `"ai_usage_tenant"` 추가(타입만, 런타임 변화 없음).
+- 계약 §5 시험 벡터(535바이트)와 본문·서명이 바이트 단위로 같다(시험으로 고정). system 만 shipping 으로 바꾼 서명도 고정(계약에 없는 값, 레저코어와 교차 확인용).
+- 동작 주의: 공용 `buildSignedCall` 은 추가 필드를 `jti` 앞에 넣어 계약 본문 순서(`jti·iat·exp` 뒤 `lines`)와 달라 `buildAiUsageTenantCall` 이 같은 검증(`assertSignSecret`·`signTtl`·`signNowSec`)으로 직접 직렬화한다. `now` 는 인자(이 모듈은 시계를 읽지 않는다).
+- 내부: `ai-usage-line/line.ts` 의 검사 보조 함수 5개를 `export` 로 열었다(패키지 공개 API 아님, `index.ts` 에서 내보내지 않음, 동작 변화 없음).
+
 ## v0.4.0-rc.8 — ai-usage-line 서브패스 (신규), AccountCallAction 에 ai_usage
 
 추가형이다(기존 API 이름·시그니처 변경 없음, 핀을 올리지 않으면 영향 없음, 의존성 0). 이음·미트가 월 AI 사용 합계 «한 줄»을 레저코어로 보낼 때 두 앱이 똑같이 필요한 **순수 계산 부분**만 담는다. 호출(네트워크)·타임아웃·집계(DB)·크론·켜기·환경변수·비밀 읽기는 앱 몫이다. 계약: 레저코어 `docs/contract/ai-usage-line-contract-v1.md`(v1).
