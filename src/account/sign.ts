@@ -9,7 +9,7 @@ const RESERVED_FIELDS: ReadonlySet<string> = new Set(["system", "action", "ext_t
  * 비밀 값은 이 코드에 없다(호출하는 앱이 환경변수에서 읽어 넘긴다). 서버 전용.
  */
 export type AccountSystem = "wholesale" | "shipping";
-export type AccountCallAction = "suspend" | "resume" | "set_access" | "read_holds" | "transfer_owner" | "ai_usage";
+export type AccountCallAction = "suspend" | "resume" | "set_access" | "read_holds" | "transfer_owner" | "ai_usage" | "ai_usage_tenant" | "ai_usage_read";
 
 export const hmacHex = (raw: string, secret: string): string => createHmac("sha256", secret).update(raw).digest("hex");
 

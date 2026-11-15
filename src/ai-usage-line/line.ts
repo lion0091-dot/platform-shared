@@ -40,25 +40,25 @@ export interface AiUsageLineInput {
 export type AiUsageLineResult = { ok: true; line: AiUsageLine } | { ok: false; code: AiUsageLineErrorCode };
 
 const ALLOWED_INPUT_KEYS: ReadonlySet<string> = new Set(["month", "calls", "tokens", "estUsd", "asOf"]);
-const MONTH_RE = /^(\d{4})-(\d{2})-01$/;
-const AS_OF_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+export const MONTH_RE = /^(\d{4})-(\d{2})-01$/;
+export const AS_OF_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 
 /** 소수 4자리 반올림(한 번만). 이미 4자리인 값에는 영향이 없다. */
 export function roundUsd4(value: number): number {
   return Number(value.toFixed(4));
 }
 
-function toMs(now: unknown): number {
+export function toMs(now: unknown): number {
   if (now instanceof Date) return now.getTime();
   return typeof now === "number" ? now : Number.NaN;
 }
 
-function isCount(n: unknown): n is number {
+export function isCount(n: unknown): n is number {
   return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 && n <= AI_USAGE_MAX_COUNT;
 }
 
 /** 서울 기준 현재 월의 번호(연*12+월-1). */
-function kstMonthIndex(ms: number): number {
+export function kstMonthIndex(ms: number): number {
   const d = new Date(ms + KST_OFFSET_MS);
   return d.getUTCFullYear() * 12 + d.getUTCMonth();
 }
