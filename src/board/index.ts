@@ -5,3 +5,4 @@ export * from "./limits";
 export * from "./notices";
 export * from "./attachments";
 export * from "./audit";
+export * from "./labels";

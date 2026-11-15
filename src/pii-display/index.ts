@@ -41,3 +41,4 @@ export {
   type UnmaskHooks,
   type UnmaskResult,
 } from "./reveal";
+export { UNMASK_ERROR_LABELS, unmaskErrorLabel } from "./labels";
