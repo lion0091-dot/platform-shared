@@ -181,7 +181,7 @@ export function anthropicVerifier(model: string, fetchImpl: typeof fetch = fetch
 // ───────── 관리 액션(스태프 전용 — 호출 전에 앱의 서버 가드를 통과해야 한다) ─────────
 const reasonOf = (raw: unknown): string => {
   const r = String(raw ?? "").trim();
-  if (r === "" || [...r].length > 500) throw new AiSharedKeyError("REASON_REQUIRED", "a reason of 1-500 characters is required");
+  if (r === "" || [...r].length > 500) throw new AiSharedKeyError("REASON_REQUIRED", "사유는 1자 이상 500자 이하로 입력해야 합니다.");
   return r;
 };
 const confirmOf = (raw: unknown): string | null => {
@@ -193,11 +193,11 @@ function limitOf(raw: unknown, max: number): number | null {
   const s = String(raw ?? "").trim();
   if (s === "") return null;
   const n = Number(s);
-  if (!Number.isInteger(n) || n < 0 || n > max) throw new AiSharedKeyError("AI_LIMIT_INVALID", "limit must be a non-negative integer");
+  if (!Number.isInteger(n) || n < 0 || n > max) throw new AiSharedKeyError("AI_LIMIT_INVALID", "한도는 0 이상의 정수여야 합니다.");
   return n;
 }
 const needUuid = (v: unknown): string => {
-  if (!isUuid(v)) throw new AiSharedKeyError("PLATFORM_INVALID", "company id must be a uuid");
+  if (!isUuid(v)) throw new AiSharedKeyError("PLATFORM_INVALID", "회사 식별값은 UUID 형식이어야 합니다.");
   return v.toLowerCase();
 };
 const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
@@ -224,7 +224,7 @@ function wrapRpcError(message: string): AiSharedKeyError {
 }
 
 export function createAiSharedKey(cfg: AiSharedKeyConfig) {
-  if (typeof cfg.masterKeyEnv !== "string" || cfg.masterKeyEnv.trim() === "") throw new AiSharedKeyError("PLATFORM_INVALID", "masterKeyEnv is required");
+  if (typeof cfg.masterKeyEnv !== "string" || cfg.masterKeyEnv.trim() === "") throw new AiSharedKeyError("PLATFORM_INVALID", "마스터 키 환경변수 이름(masterKeyEnv)은 필수입니다.");
   const names = resolveRpcNames(cfg.rpcNames);
   const opts: AiOpts = { provider: cfg.provider, scope: cfg.scope, rpcNames: cfg.rpcNames };
   const ring: Ring = cfg.ring ?? (() => loadKeyring(cfg.env ?? process.env, { current: cfg.masterKeyEnv }));
@@ -234,7 +234,7 @@ export function createAiSharedKey(cfg: AiSharedKeyConfig) {
     try {
       r = await cfg.rpc.rpc(fn, args);
     } catch {
-      throw new AiSharedKeyError("RPC_FAILED", "rpc call failed");
+      throw new AiSharedKeyError("RPC_FAILED", "서버 호출에 실패했습니다.");
     }
     if (r.error) throw wrapRpcError(r.error.message);
     return r.data;
@@ -250,7 +250,7 @@ export function createAiSharedKey(cfg: AiSharedKeyConfig) {
 
     async keyStatus(actor: string): Promise<AiKeyStatus> {
       const p = await call(names.keyStatus, { p_actor: actor });
-      if (!p || typeof p !== "object") throw new AiSharedKeyError("NOT_FOUND", "ai key status");
+      if (!p || typeof p !== "object") throw new AiSharedKeyError("NOT_FOUND", "AI 키 상태를 찾을 수 없습니다.");
       return {
         registered: p.registered === true, version: p.version ?? null, status: p.status ?? null, key_hint: p.key_hint ?? null,
         verified_at: p.verified_at ?? null, last_error_code: p.last_error_code ?? null, month: String(p.month ?? ""),
@@ -288,7 +288,7 @@ export function createAiSharedKey(cfg: AiSharedKeyConfig) {
 
     async companyOverview(actor: string, tenantId: string): Promise<AiCompanyOverview> {
       const p = await call(names.companyOverview, { p_actor: actor, p_tenant: needUuid(tenantId) });
-      if (!p || typeof p !== "object") throw new AiSharedKeyError("NOT_FOUND", "tenant");
+      if (!p || typeof p !== "object") throw new AiSharedKeyError("NOT_FOUND", "회사를 찾을 수 없습니다.");
       return {
         platform_enabled: p.platform_enabled === true, owner_off: p.owner_off === true, owner_off_at: p.owner_off_at ?? null, owner_off_role: p.owner_off_role ?? null,
         configured: p.configured === true, usable: p.usable === true, month: String(p.month ?? ""), calls: Number(p.calls ?? 0), failures: Number(p.failures ?? 0),
@@ -305,7 +305,7 @@ export function createAiSharedKey(cfg: AiSharedKeyConfig) {
 
     async companyList(actor: string): Promise<AiCompanyList> {
       const p = await call(names.companyList, { p_actor: actor });
-      if (!p || typeof p !== "object" || !Array.isArray(p.rows)) throw new AiSharedKeyError("NOT_FOUND", "ai company list");
+      if (!p || typeof p !== "object" || !Array.isArray(p.rows)) throw new AiSharedKeyError("NOT_FOUND", "AI 회사 목록을 찾을 수 없습니다.");
       return {
         month: String(p.month ?? ""), key_active: p.key_active === true, truncated: p.truncated === true,
         rows: p.rows.map((r: any) => ({

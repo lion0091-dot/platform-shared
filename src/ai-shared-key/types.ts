@@ -65,7 +65,7 @@ const RPC_NAME_RE = /^[a-z_][a-z0-9_]{0,62}$/;
 export function resolveRpcNames(overrides?: Partial<AiRpcNames>): AiRpcNames {
   const out: Record<string, string> = { ...AI_RPC_DEFAULTS };
   for (const [k, v] of Object.entries(overrides ?? {})) {
-    if (!(k in AI_RPC_DEFAULTS)) throw new AiSharedKeyError("PLATFORM_INVALID", `unknown rpc name key: ${k}`);
+    if (!(k in AI_RPC_DEFAULTS)) throw new AiSharedKeyError("PLATFORM_INVALID", `알 수 없는 RPC 이름 키입니다: ${k}`);
     if (typeof v !== "string" || !RPC_NAME_RE.test(v)) throw new AiSharedKeyError("PLATFORM_INVALID", `invalid rpc name for ${k}`);
     out[k] = v;
   }
@@ -224,3 +224,4 @@ export function estimateCostUsd(usage: AiUsageForCost, prices: AiPriceTable): { 
   const usd = (usage.input * p.input + usage.output * p.output + (usage.cache ?? 0) * (p.cache ?? p.input)) / 1_000_000;
   return { usd: Math.round(usd * 1e6) / 1e6, ...base };
 }
+export * from "./labels";
