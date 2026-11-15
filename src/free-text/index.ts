@@ -13,3 +13,4 @@ export {
   type MaskedKind,
   type WarningCode,
 } from "./mask";
+export { FREE_TEXT_WARNING_LABELS, FREE_TEXT_FAILURE_LABELS, FREE_TEXT_MASKED_KIND_LABELS, freeTextWarningLabel, freeTextFailureLabel, freeTextMaskedKindLabel } from "./labels";

@@ -20,3 +20,4 @@ export {
   type RestoreResult,
   type SafePayload,
 } from "./types";
+export * from "./labels";

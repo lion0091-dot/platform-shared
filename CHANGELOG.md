@@ -9,7 +9,18 @@
 - `AccountCallAction` 타입에 `"ai_usage"` 추가(타입만, 런타임 변화 없음). 이음의 `"link" as AccountCallAction` 같은 형 변환 우회는 핀 상승 뒤 지울 수 있다.
 - 계약 §3 시험 벡터와 본문·서명이 바이트 단위로 같다(시험으로 고정). system 만 shipping 으로 바꾼 서명도 고정(계약에 없는 값, 레저코어와 교차 확인용).
 - 동작 주의: `buildAiUsageLine` 은 `now` 를 인자로 받는다(이 모듈은 시계를 읽지 않는다). `buildAiUsageCall` 의 `deps.now` 도 필수다.
-- 버전 표기: rc.7(한글 라벨 표)은 별도 브랜치(`feat/ko-labels`)에서 준비 중이라 이 버전은 rc.8 이다. rc.7 이 먼저 병합되면 이 항목과 같은 위치(맨 위)에서 CHANGELOG 충돌이 나므로 양쪽을 유지해 합친다.
+- 버전 표기: rc.7(한글 라벨 표, 위 아래 항목)이 먼저 병합·태그되어 이 버전은 rc.8 이다.
+
+## v0.4.0-rc.7 — 한글 라벨 표 (추가형), 영어 문구 한글화
+
+사용자 화면에 코드값·영어가 그대로 나오지 않게 «코드→한글 문구» 상수 표와 getter 를 추가한다. 기존 API 이름·시그니처는 그대로이고, 표는 앱이 getter 의 `overrides` 인자로 일부만 덮어쓸 수 있다(표 자체는 바뀌지 않는다). 모르는 코드는 코드를 보이지 않는 한글 일반 문구로 돌려준다.
+- `@platform/shared/board`: `BOARD_ERROR_LABELS`(오류 25종, 첨부 검증 결과 포함)·`BOARD_TIER1_CATEGORY_LABELS`·`BOARD_TIER2_CATEGORY_LABELS`·`BOARD_STATUS_LABELS`·`BOARD_AUTHOR_KIND_LABELS`·`BOARD_VIEWER_KIND_LABELS`·`BOARD_REPLY_VISIBILITY_LABELS`·`BOARD_PII_KIND_LABELS`, getter `boardErrorLabel`·`boardStatusLabel`·`boardCategoryLabel`·`boardPiiKindLabel`·`boardVisibilityLabel`.
+- `@platform/shared/ai-guard`: `GUARD_REASON_LABELS`(11종)·`GUARD_KIND_LABELS`·`GUARD_WARNING_LABELS`, getter `guardReasonLabel`·`guardKindLabel`·`guardWarningLabel`.
+- `@platform/shared/ai-shared-key`(및 `/types`): `AI_RESERVE_CODE_LABELS`(6종+`READ_FAILED`)·`AI_ERROR_CODE_LABELS`, getter `aiReserveLabel`·`aiErrorLabel`.
+- `@platform/shared/pii-display`: `UNMASK_ERROR_LABELS`·`unmaskErrorLabel`. `@platform/shared/free-text`: `FREE_TEXT_WARNING_LABELS`·`FREE_TEXT_FAILURE_LABELS`·`FREE_TEXT_MASKED_KIND_LABELS`와 getter 3개.
+- **동작 주의(문구만 바뀜)**: `ai-shared-key` 가 던지는 `AiSharedKeyError` 의 `message` 영어 8곳이 한글로 바뀌었다(`code` 는 그대로). 앱이 `message` 문자열 비교로 분기했다면 `code` 로 바꿔야 한다. `payments` 승인 응답 상태 불일치 문구에서 영어 코드값 `DONE` 을 뺐다(`code` 는 그대로 `STATUS_…`).
+- `secrets` 는 표를 만들지 않았다: 오류 코드는 서버 내부 예외로만 쓰이고 앱 코드가 화면에 직접 내보내지 않는 구조이기 때문(앱이 화면에 내보낸다면 그때 추가).
+- 시험: 모든 코드가 라벨을 갖는지(누락 0), 라벨에 영어 코드가 섞이지 않는지(허용 고유명: AI·MB·pdf·txt·log·jpg·png·webp·UUID·RPC), getter 의 덮어쓰기·폴백.
 
 ## v0.4.0-rc.6 — ai-shared-key 서브패스 (신규)
 
