@@ -279,7 +279,9 @@ describe("classifyAiUsageResponse — 계약 §4 표", () => {
     expect(c(413, { error: "CALL_TOO_LARGE" })).toEqual({ action: "stop", code: "CALL_TOO_LARGE" });
   });
 
-  it("503·500·네트워크는 다음 슬롯", () => {
+  it("503·429(속도 제한)·500·네트워크는 다음 슬롯", () => {
+    expect(c(429, { error: "RATE_LIMITED" })).toEqual({ action: "next_slot", code: "RATE_LIMITED" });
+    expect(c(429, null)).toEqual({ action: "next_slot", code: "HTTP_429" });
     expect(c(503, { error: "AI_USAGE_NOT_CONFIGURED" })).toEqual({ action: "next_slot", code: "AI_USAGE_NOT_CONFIGURED" });
     expect(c(500, null)).toEqual({ action: "next_slot", code: "HTTP_500" });
     expect(c(502, "<html>")).toEqual({ action: "next_slot", code: "HTTP_502" });
@@ -290,6 +292,8 @@ describe("classifyAiUsageResponse — 계약 §4 표", () => {
     expect(c(200, { status: "SOMETHING" })).toEqual({ action: "stop", code: "UNKNOWN_STATUS" });
     expect(c(200, null)).toEqual({ action: "stop", code: "UNKNOWN_STATUS" });
     expect(c(404, null)).toEqual({ action: "stop", code: "HTTP_404" });
+    expect(c(408, null)).toEqual({ action: "stop", code: "HTTP_408" }); // 429 외 나머지 4xx 는 stop 유지
+    expect(c(403, null)).toEqual({ action: "stop", code: "HTTP_403" });
     expect(c(409, { error: "CALL_REPLAY" })).toEqual({ action: "stop", code: "CALL_REPLAY" });
     expect(c(Number.NaN, null)).toEqual({ action: "stop", code: "HTTP_UNKNOWN" });
   });
