@@ -42,3 +42,17 @@ export const AI_USAGE_TENANT_ITEM_KEYS = Object.freeze([
   "calls",
   "as_of",
 ] as const);
+
+// ── 읽기 호출(레저코어 → 앱 방향 값 조회). 계약: 레저코어 docs/contract/ai-usage-read-contract-v1.md ──
+
+/** 읽기 호출 경로. */
+export const AI_USAGE_READ_PATH = "/api/provision/ai-usage-read";
+
+/** 읽기 호출의 서명 본문 action. */
+export const AI_USAGE_READ_ACTION = "ai_usage_read" as const;
+
+/** 한 호출의 최대 외부 id 수. */
+export const AI_USAGE_READ_MAX_IDS = 200;
+
+/** 읽기 호출 본문 한도(바이트, 8KB). 넘으면 수신이 413 으로 거부한다. */
+export const AI_USAGE_READ_MAX_BODY_BYTES = 8192;

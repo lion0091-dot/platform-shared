@@ -356,7 +356,7 @@ describe("정적 점검 — 순수 함수 모듈", () => {
     .map((f) => ({ f, text: readFileSync(join(dir, f), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1") }));
 
   it("소스 파일", () => {
-    expect(sources.map((s) => s.f).sort()).toEqual(["batch.ts", "constants.ts", "index.ts", "line.ts", "response.ts"]);
+    expect(sources.map((s) => s.f).sort()).toEqual(["batch.ts", "constants.ts", "index.ts", "line.ts", "read.ts", "response.ts"]);
   });
 
   const BANNED: [string, RegExp][] = [
