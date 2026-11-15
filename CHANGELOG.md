@@ -2,6 +2,15 @@
 
 `@platform/shared/payments`·`@platform/shared/secrets` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
+## v0.4.0-rc.8 — ai-usage-line 서브패스 (신규), AccountCallAction 에 ai_usage
+
+추가형이다(기존 API 이름·시그니처 변경 없음, 핀을 올리지 않으면 영향 없음, 의존성 0). 이음·미트가 월 AI 사용 합계 «한 줄»을 레저코어로 보낼 때 두 앱이 똑같이 필요한 **순수 계산 부분**만 담는다. 호출(네트워크)·타임아웃·집계(DB)·크론·켜기·환경변수·비밀 읽기는 앱 몫이다. 계약: 레저코어 `docs/contract/ai-usage-line-contract-v1.md`(v1).
+- `@platform/shared/ai-usage-line`: `buildAiUsageLine`(입력 키 허용 목록 5개 `month·calls·tokens·estUsd·asOf`, 그 밖의 키는 `LINE_EXTRA_KEY` — 회사·사용자 정보 혼입 차단, 출력 키 `contract·month·calls·tokens·est_usd·as_of` 순서 고정, 범위·소수 4자리·서울 월·`as_of` 미래 5분 검사, 던지지 않음)·`estimateAiUsageUsd`(모델별 값을 반올림 없이 합산한 뒤 **한 번만** 소수 4자리 반올림, 캐시 단가가 없으면 입력 단가, 단가표에 없는 모델이 있으면 `MODEL_PRICE_MISSING` 으로 전체 거부)·`classifyAiUsageResponse`(계약 §4: sent·retry_resign·next_slot·stop, 알 수 없는 응답은 stop)·`aiUsageMonthsToSend`(서울 0·6·12·18시 첫 15분 창, 서울 매월 1일에는 모든 슬롯에서 직전 달을 먼저)·`buildAiUsageCall`(`buildSignedCall` 을 `action:"ai_usage"`·`ext_tenant:"APP"` 으로 부르는 얇은 래퍼, 본문 2,048바이트 검사, 실패는 코드로)·상수(`AI_USAGE_PATH` 등).
+- `AccountCallAction` 타입에 `"ai_usage"` 추가(타입만, 런타임 변화 없음). 이음의 `"link" as AccountCallAction` 같은 형 변환 우회는 핀 상승 뒤 지울 수 있다.
+- 계약 §3 시험 벡터와 본문·서명이 바이트 단위로 같다(시험으로 고정). system 만 shipping 으로 바꾼 서명도 고정(계약에 없는 값, 레저코어와 교차 확인용).
+- 동작 주의: `buildAiUsageLine` 은 `now` 를 인자로 받는다(이 모듈은 시계를 읽지 않는다). `buildAiUsageCall` 의 `deps.now` 도 필수다.
+- 버전 표기: rc.7(한글 라벨 표)은 별도 브랜치(`feat/ko-labels`)에서 준비 중이라 이 버전은 rc.8 이다. rc.7 이 먼저 병합되면 이 항목과 같은 위치(맨 위)에서 CHANGELOG 충돌이 나므로 양쪽을 유지해 합친다.
+
 ## v0.4.0-rc.6 — ai-shared-key 서브패스 (신규)
 
 신규 서브패스 3개, 추가형(기존 API 변경 없음, 핀을 올리지 않으면 영향 없음). 설계: `docs/design-ai-shared-key-module-2026-11.md`.
