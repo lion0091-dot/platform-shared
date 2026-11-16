@@ -21,7 +21,8 @@
     "./ai-shared-key/types": "./src/ai-shared-key/types.ts",
     "./ai-shared-key/contract": "./src/ai-shared-key/contract.ts",
     "./ai-usage-line": "./src/ai-usage-line/index.ts",
-    "./ai-usage-tenant-line": "./src/ai-usage-tenant-line/index.ts"
+    "./ai-usage-tenant-line": "./src/ai-usage-tenant-line/index.ts",
+    "./payments-outside-cancel": "./src/payments-outside-cancel/index.ts"
   },
   "files": ["src"],
   "scripts": {

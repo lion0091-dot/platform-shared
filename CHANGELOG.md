@@ -2,6 +2,14 @@
 
 `@platform/shared/payments`·`@platform/shared/secrets` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
+## Unreleased — payments-outside-cancel 서브패스 (신규, 층 1)
+
+추가형이다(기존 API 이름·시그니처 변경 없음, 핀을 올리지 않으면 영향 없음, 의존성 0). 버전 번호는 올리지 않았다(rc.10 번호는 릴리스 승인 때). 토스 밖 취소(대시보드 직접 취소·부분 취소)를 두 앱이 **같은 규칙**으로 판정하는 순수 부분만 담는다. 웹훅 HTTP 계층·크론·DB 표·알림·화면은 앱 몫이고, 감지 결과로 결제·정산·장부 열을 자동으로 쓰지 않는다(표시·알림만). 오케스트레이션(층 2)은 포함하지 않는다.
+- `@platform/shared/payments-outside-cancel`: `judgeOutsideCancel`·`confirmStable`·`fromTossPayment`·`isDueForCheck`·`orderAgeDays`·`paymentRefHash`·`cancelEventKey`·`webhookUrlToken`·`verifyWebhookUrlToken`·`extractWebhookRef`·`orderRefMatches`, 사례표 `OUTSIDE_CANCEL_CASES`(14건)·`runOutsideCancelConformance`·`referenceOutsideCancelAdapter`, 시나리오 표 `OUTSIDE_CANCEL_SCENARIOS`(6종), 타입.
+- 전액 취소 정의는 `payments/status` 의 `isFullyCanceled`·`canceledTotal`(잔액 0 인 PARTIAL_CANCELED 실측 반영)과 같다. 미트 현행 `balance<=0 → full`·`balance>=total → ok` 와 같은 결과임을 시험으로 고정했다.
+- 웹훅 보조는 본문의 상태·금액을 읽지 않고 `paymentKey`/`orderId` 만 꺼낸다(재조회한 값만 근거). 주소 토큰은 미트 현행(HMAC-SHA256 `toss-webhook:<id>`, 비밀 24자 이상)과 같은 값이다.
+- 시험: 사례 14건 + 토스 원문 경유 + 멱등·재관측 + 이상 입력(무작위 3,000건 던지지 않음) + 성능(판정 10만 건 < 1초) + 정적 점검(시계·네트워크·환경변수·DB·console 없음).
+
 ## v0.4.0-rc.9 — ai-usage-tenant-line 서브패스 (신규), AccountCallAction 에 ai_usage_tenant
 
 추가형이다(기존 API 이름·시그니처 변경 없음, 핀을 올리지 않으면 영향 없음, 의존성 0). 이음·미트가 «테넌트(운영사·업체)별 월 AI 토큰» 한 줄을 레저코어로 **배치**로 보낼 때 두 앱이 똑같이 필요한 순수 계산 부분만 담는다. 호출(네트워크)·타임아웃·집계·크론·켜기·«어떤 테넌트를 보낼지»(변경분 + 하루 1회 전체)는 앱 몫이다. 계약: 레저코어 `docs/contract/ai-usage-tenant-line-contract-v1.md`(v1, 충돌 시 그 문서가 우선).
