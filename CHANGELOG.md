@@ -2,6 +2,15 @@
 
 `@platform/shared/payments`·`@platform/shared/secrets` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
+## 미출시 (rc.12 후보) — withholding 서브패스 (신규)
+
+추가형이다(기존 export 불변, 의존성 0, 핀을 올리지 않으면 영향 없음). **[세무사 확인 필요]** 기준 구현의 현행 식을 그대로 옮긴 값이며 세무사 확인 전에는 «기준 구현의 현행 식과 같은 값»으로만 쓴다.
+- `@platform/shared/withholding`: `computePersonalWithholding(공급가)` → `{ ok:true, value:{ total, income, local } }` 또는 `{ ok:false, code }`. 총액 = floor(공급가×33/1000), 소득세 = floor(공급가×30/1000), 지방소득세 = 총액 − 소득세(합 항상 일치). 예: 191,760 → 6,328 = 5,752 + 576. 상수 `WITHHOLDING_*`.
+- «대상이면 계산»만 한다(대상 판정은 앱 몫). 음수·소수·비수·2,147,483,647 초과는 던지지 않고 거부(코드 식은 음수에서 내림, DB 식은 0 방향 절사로 서로 달라 한쪽으로 고르지 않음).
+- `judgeWithholdingTarget({ businessNumber, taxInvoice })` → `{ decision: "PERSONAL"|"BUSINESS"|"NEEDS_CHECK", personal: boolean|null, reason }` (**[세무사 확인 필요]**). ① 사업자번호 있음 → 사업자 ② 없고 계산서 있음 → 사업자 ③ 둘 다 없음 → 개인(3.3%). 사업자번호는 «유무»만 받고 형식은 검증하지 않는다(앱 몫). 입력 `undefined` = 불명 → 단정하지 않고 `NEEDS_CHECK`(다른 쪽 근거로 정해지면 그대로: 번호 불명 + 계산서 있음 = 사업자). `null`/빈 문자열/`false` = 없음. reason: `BUSINESS_NUMBER`·`TAX_INVOICE`·`NO_BUSINESS_NO_INVOICE`·`BUSINESS_NUMBER_UNKNOWN`·`TAX_INVOICE_UNKNOWN`.
+- **호출 앱 안내**: **미조회 값은 반드시 `undefined` 로 넘길 것. `null` 은 «없음»으로 판정된다**(DB 열이 비어 있음 = 실제 «없음»). 그래서 조회에 실패했거나 아직 읽지 않은 항목을 `null` 로 채워 넘기면 둘 다 `null` 일 때 개인(3.3% 원천징수)으로 판정된다. 앱은 ① DB 에서 읽은 값만 그대로(`null` 포함) 넘기고 ② 못 읽은 값은 키를 빼거나 `undefined` 로 두며 ③ `NEEDS_CHECK` 는 원천징수를 자동 적용하지 말고 사람 확인으로 돌린다. 사업자번호 형식·체크섬 검증은 앱 몫이다(공용 함수는 «유무»만 본다).
+- 시험: 기준 구현 표본표, 경계·0원·큰 금액, 0~200,000 합 일치 전수, DB 정수 나눗셈 대조, 이상 입력, 판정 표 13건 + 이상 입력 2건.
+
 ## 미출시 (rc.12 후보) — ai-guard 계좌 제외 규칙 축소 (`ai-guard-rules/3`)
 
 가림 범위를 **늘리기만** 한다(공개 API 시그니처 불변, 의존성 0). 구분자 없는 10자리 이상 연속 숫자를 계좌로 볼 때 예외로 빼던 규칙이 실제 계좌를 통과시키던 구멍을 좁혔다.
