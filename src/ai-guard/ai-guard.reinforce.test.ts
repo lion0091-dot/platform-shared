@@ -28,7 +28,7 @@ function okText(r: GuardResult): string {
 
 describe("규칙 버전", () => {
   it("보강으로 규칙이 바뀌어 /2", () => {
-    expect(GUARD_RULES_VERSION).toBe("ai-guard-rules/2");
+    expect(GUARD_RULES_VERSION).toBe("ai-guard-rules/3");
   });
 });
 

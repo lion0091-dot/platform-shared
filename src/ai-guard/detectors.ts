@@ -101,20 +101,33 @@ function rrnDateValid(d: string): boolean {
   return mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31;
 }
 
-const COMPACT_DATE = /^20\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?:\d{2}|\d{4}|\d{6})?$/;
 const ISO_DATE = /^\d{4}-\d{1,2}-\d{1,2}$/;
 
-/** 금액·소수·날짜로 읽히는 연속 숫자는 계좌/카드로 보지 않는다(오탐 제외). */
+/** 구분자 없는 14자리 접수 일시(YYYYMMDDHHMMSS)가 달력·시각상 정상이면 true. 10·12자리 등은 계좌와 구분이 안 돼 예외로 두지 않는다. */
+function isCompactTimestamp14(run: string): boolean {
+  if (run.length !== 14 || !run.startsWith("20")) return false;
+  const y = Number(run.slice(0, 4));
+  const mo = Number(run.slice(4, 6));
+  const d = Number(run.slice(6, 8));
+  const h = Number(run.slice(8, 10));
+  const mi = Number(run.slice(10, 12));
+  const sec = Number(run.slice(12, 14));
+  if (mo < 1 || mo > 12 || d < 1 || h > 23 || mi > 59 || sec > 59) return false;
+  return d <= new Date(Date.UTC(y, mo, 0)).getUTCDate();
+}
+
+/**
+ * 금액·소수·정상 일시로 읽히는 연속 숫자는 계좌/카드로 보지 않는다(오탐 제외). 예외는 좁게 둔다(rules/3):
+ * - 앞뒤 쉼표는 예외가 아니다. 쉼표 금액은 3자리씩 끊겨 10자리 이상 연속 숫자가 될 수 없다.
+ * - 소수점은 숫자 사이(앞뒤에 숫자가 이어지는 점)일 때만 예외다.
+ * - 뒤 단위(원·만·천·억)는 숫자에 «붙어서» 오고 «00»으로 끝나는 둥근 금액일 때만 예외다(띄어 쓴 단위·둥글지 않은 숫자는 계좌로 가린다).
+ */
 function plainNumberExcluded(text: string, start: number, end: number, run: string): boolean {
-  const b = text[start - 1];
-  if (b === "," || b === ".") return true;
-  const a = text[end];
-  if ((a === "," || a === ".") && isDigit(text[end + 1])) return true;
-  if (COMPACT_DATE.test(run)) return true;
-  let i = end;
-  while (i < end + 3 && text[i] === " ") i++;
-  const unit = text[i];
-  return unit === "원" || unit === "만" || unit === "천" || unit === "억";
+  if (text[start - 1] === "." && isDigit(text[start - 2])) return true;
+  if (text[end] === "." && isDigit(text[end + 1])) return true;
+  if (isCompactTimestamp14(run)) return true;
+  const unit = text[end];
+  return (unit === "원" || unit === "만" || unit === "천" || unit === "억") && run.endsWith("00");
 }
 
 // ── 패턴 ───────────────────────────────────────────────────────
