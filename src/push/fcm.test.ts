@@ -1,6 +1,6 @@
 import { createVerify, generateKeyPairSync } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { isFcmEndpoint, loadFcm, resetFcmTokenCache, sendFcm, signServiceJwt, type FcmConfig } from "./fcm";
+import { FCM_TIMEOUT_MS, isFcmEndpoint, loadFcm, resetFcmTokenCache, sendFcm, signServiceJwt, type FcmConfig } from "./fcm";
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", {
   modulusLength: 2048,
@@ -96,5 +96,98 @@ describe("sendFcm", () => {
     expect(await sendFcm(CFG, TOKEN, MSG, { fetch: vi.fn(async () => json({}, 401)) as never })).toEqual({ ok: false, gone: false });
     resetFcmTokenCache();
     expect(await sendFcm(CFG, TOKEN, MSG, { fetch: vi.fn(async () => { throw new Error("net"); }) as never })).toEqual({ ok: false, gone: false });
+  });
+});
+
+describe("타임아웃·토큰 요청 공유", () => {
+  // 신호를 받으면 중단되는 «응답 없는» fetch
+  const hang = (init?: RequestInit) =>
+    new Promise<Response>((_, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "TimeoutError")));
+    });
+
+  it("토큰 요청이 응답하지 않으면 제한 시간 뒤 실패(gone=false)로 끝난다", async () => {
+    const f = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => hang(init));
+
+    expect(await sendFcm(CFG, TOKEN, MSG, { fetch: f as never, timeoutMs: 20 })).toEqual({ ok: false, gone: false });
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  it("발송 요청이 응답하지 않으면 제한 시간 뒤 실패(gone=false, 토큰은 지우지 않는다)", async () => {
+    const f = vi.fn(async (url: string | URL | Request, init?: RequestInit) => (String(url).includes("oauth2") ? json({ access_token: "at-1", expires_in: 3600 }) : hang(init)));
+
+    expect(await sendFcm(CFG, TOKEN, MSG, { fetch: f as never, timeoutMs: 20 })).toEqual({ ok: false, gone: false });
+  });
+
+  it("기본 제한 시간은 8초이고, 잘못된 값은 기본값으로 본다", async () => {
+    expect(FCM_TIMEOUT_MS).toBe(8_000);
+
+    const seen: (AbortSignal | null | undefined)[] = [];
+    const f = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      seen.push(init?.signal);
+      return String(url).includes("oauth2") ? json({ access_token: "at-1", expires_in: 3600 }) : json({ name: "m" });
+    });
+
+    for (const bad of [undefined, 0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      resetFcmTokenCache();
+      expect(await sendFcm(CFG, TOKEN, MSG, { fetch: f as never, timeoutMs: bad })).toEqual({ ok: true });
+    }
+
+    expect(seen.length).toBe(10);
+    expect(seen.every((s) => s instanceof AbortSignal)).toBe(true);
+  });
+
+  it("콜드 상태에서 병렬 발송 10건이어도 토큰 요청은 1번", async () => {
+    let tokenCalls = 0;
+    const f = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes("oauth2")) {
+        tokenCalls++;
+        await new Promise((r) => setTimeout(r, 20));
+        return json({ access_token: "at-1", expires_in: 3600 });
+      }
+      return json({ name: "m" });
+    });
+    const rs = await Promise.all(Array.from({ length: 10 }, () => sendFcm(CFG, TOKEN, MSG, { fetch: f as never })));
+
+    expect(rs.every((r) => r.ok)).toBe(true);
+    expect(tokenCalls).toBe(1);
+    expect(f).toHaveBeenCalledTimes(11);
+  });
+
+  it("토큰 요청이 실패하면 공유한 모두 실패하고, 실패는 캐시하지 않아 다음 호출이 다시 요청한다", async () => {
+    let tokenCalls = 0;
+    const f = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes("oauth2")) {
+        tokenCalls++;
+        await new Promise((r) => setTimeout(r, 10));
+        return json({ error: "x" }, 500);
+      }
+      return json({ name: "m" });
+    });
+    const rs = await Promise.all(Array.from({ length: 5 }, () => sendFcm(CFG, TOKEN, MSG, { fetch: f as never })));
+
+    expect(rs.every((r) => r.ok === false && r.gone === false)).toBe(true);
+    expect(tokenCalls).toBe(1);
+
+    await sendFcm(CFG, TOKEN, MSG, { fetch: f as never });
+
+    expect(tokenCalls).toBe(2);
+  });
+
+  it("서비스 계정이 다르면 토큰 요청을 공유하지 않는다", async () => {
+    let tokenCalls = 0;
+    const f = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).includes("oauth2")) {
+        tokenCalls++;
+        await new Promise((r) => setTimeout(r, 10));
+        return json({ access_token: `at-${tokenCalls}`, expires_in: 3600 });
+      }
+      return json({ name: "m" });
+    });
+    const other: FcmConfig = { ...CFG, clientEmail: "other@demo-proj.iam.gserviceaccount.com" };
+
+    await Promise.all([sendFcm(CFG, TOKEN, MSG, { fetch: f as never }), sendFcm(other, TOKEN, MSG, { fetch: f as never })]);
+
+    expect(tokenCalls).toBe(2);
   });
 });

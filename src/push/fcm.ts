@@ -50,16 +50,20 @@ export function signServiceJwt(cfg: FcmConfig, nowSec: number): string {
 type Fetch = typeof fetch;
 
 let cached: { token: string; expiresAt: number; key: string } | null = null;
+/** 진행 중인 토큰 요청(같은 키). 콜드 상태에서 병렬 발송이 와도 OAuth 요청·서명은 한 번만 한다. */
+let pending: { key: string; promise: Promise<string | null> } | null = null;
 
-async function accessToken(cfg: FcmConfig, f: Fetch, now: () => number): Promise<string | null> {
-  const key = `${cfg.clientEmail}:${cfg.projectId}`;
+/** FCM·OAuth 호출 제한 시간(ms) 기본값. 구글이 응답하지 않아도 호출한 서버 액션이 무한정 멈추지 않게 한다. */
+export const FCM_TIMEOUT_MS = 8_000;
 
-  if (cached && cached.key === key && cached.expiresAt - 60_000 > now()) return cached.token;
+const timeoutOf = (ms: number | undefined): number => (typeof ms === "number" && Number.isFinite(ms) && ms > 0 ? ms : FCM_TIMEOUT_MS);
 
+async function requestToken(cfg: FcmConfig, f: Fetch, now: () => number, key: string, timeoutMs: number): Promise<string | null> {
   const res = await f("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: signServiceJwt(cfg, Math.floor(now() / 1000)) }),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   if (!res.ok) return null;
@@ -73,8 +77,24 @@ async function accessToken(cfg: FcmConfig, f: Fetch, now: () => number): Promise
   return body.access_token;
 }
 
+async function accessToken(cfg: FcmConfig, f: Fetch, now: () => number, timeoutMs: number): Promise<string | null> {
+  const key = `${cfg.clientEmail}:${cfg.projectId}`;
+
+  if (cached && cached.key === key && cached.expiresAt - 60_000 > now()) return cached.token;
+  if (pending && pending.key === key) return pending.promise;
+
+  const promise = requestToken(cfg, f, now, key, timeoutMs).finally(() => {
+    if (pending?.promise === promise) pending = null;
+  });
+
+  pending = { key, promise };
+
+  return promise;
+}
+
 export function resetFcmTokenCache() {
   cached = null;
+  pending = null;
 }
 
 export interface FcmMessage {
@@ -95,18 +115,20 @@ export async function sendFcm(
   cfg: FcmConfig,
   token: string,
   msg: FcmMessage,
-  deps: { fetch?: Fetch; now?: () => number } = {},
+  deps: { fetch?: Fetch; now?: () => number; /** 토큰·발송 각 호출의 제한 시간(ms). 기본 FCM_TIMEOUT_MS(8초). */ timeoutMs?: number } = {},
 ): Promise<FcmResult> {
   const f = deps.fetch ?? fetch;
   const now = deps.now ?? Date.now;
 
   try {
-    const at = await accessToken(cfg, f, now);
+    const timeoutMs = timeoutOf(deps.timeoutMs);
+    const at = await accessToken(cfg, f, now, timeoutMs);
 
     if (!at) return { ok: false, gone: false };
 
     const res = await f(`https://fcm.googleapis.com/v1/projects/${encodeURIComponent(cfg.projectId)}/messages:send`, {
       method: "POST",
+      signal: AbortSignal.timeout(timeoutMs),
       headers: { Authorization: `Bearer ${at}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         message: {

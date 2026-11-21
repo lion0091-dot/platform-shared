@@ -192,6 +192,36 @@ describe("record + onRecorded 훅", () => {
       vi.useRealTimers();
     }
   });
+  it("scheduleHook 을 주면 훅을 기다리지 않고 즉시 ok, 훅은 넘겨진 Promise 로 나중에 실행된다", async () => {
+    const { sb } = fakeRpc(() => ({ data: null }));
+    let release!: () => void;
+    const slow = new Promise<void>((r) => { release = r; });
+    const hook = vi.fn(() => slow);
+    const tasks: Promise<void>[] = [];
+    const r = await recordPlatformAiUsage(sb, args, { feature: "f" }, hook, { scheduleHook: (t) => tasks.push(t) });
+    expect(r).toEqual({ ok: true });
+    expect(tasks.length).toBe(1);
+    await Promise.resolve();
+    expect(hook).toHaveBeenCalledWith(args, { feature: "f" });
+    release();
+    await expect(tasks[0]).resolves.toBeUndefined();
+  });
+  it("scheduleHook: 훅이 던져도 반환은 ok(hookError 없음)이고 넘긴 Promise 는 거부되지 않는다", async () => {
+    const tasks: Promise<void>[] = [];
+    const r = await recordPlatformAiUsage(fakeRpc(() => ({ data: null })).sb, args, undefined, () => { throw new Error("detail failed"); }, { scheduleHook: (t) => tasks.push(t) });
+    expect(r).toEqual({ ok: true });
+    await expect(tasks[0]).resolves.toBeUndefined();
+  });
+  it("scheduleHook 자체가 던져도 record 결과에 영향이 없다", async () => {
+    const r = await recordPlatformAiUsage(fakeRpc(() => ({ data: null })).sb, args, undefined, vi.fn(), { scheduleHook: () => { throw new Error("no waitUntil"); } });
+    expect(r).toEqual({ ok: true });
+  });
+  it("scheduleHook 을 줘도 RPC 가 실패하면 훅을 예약하지 않는다", async () => {
+    const tasks: Promise<void>[] = [];
+    const r = await recordPlatformAiUsage(fakeRpc(() => ({ error: "NOT_FOUND: x" })).sb, args, undefined, vi.fn(), { scheduleHook: (t) => tasks.push(t) });
+    expect(r).toEqual({ ok: false, code: "READ_FAILED" });
+    expect(tasks.length).toBe(0);
+  });
   it("잘못된 인자는 RPC 를 부르지 않는다", async () => {
     const { sb, calls } = fakeRpc(() => ({ data: null }));
     for (const bad of [{ ...args, tenantId: "nope" }, { ...args, input: -1 }, { ...args, output: Number.NaN }]) {
@@ -272,6 +302,13 @@ describe("createAiSharedKey / 관리 액션", () => {
     expect(calls[0].fn).toBe("ai_reserve");
     expect(() => resolveRpcNames({ nope: "x" } as never)).toThrow(AiSharedKeyError);
     expect(() => resolveRpcNames({ reserve: "bad name; drop" })).toThrow(AiSharedKeyError);
+  });
+  it("createAiSharedKey 의 config.scheduleHook 이 record 에 전달된다", async () => {
+    const onRecorded = vi.fn();
+    const tasks: Promise<void>[] = [];
+    const { ai } = mk(() => ({ data: null }), { onRecorded, scheduleHook: (t: Promise<void>) => tasks.push(t) });
+    expect(await ai.record({ tenantId: T1, reserved: 1, input: 1, output: 1, cache: 0 }, { feature: "x" })).toEqual({ ok: true });
+    expect(tasks.length).toBe(1);
   });
   it("record 는 config.onRecorded 훅을 쓴다", async () => {
     const onRecorded = vi.fn();
