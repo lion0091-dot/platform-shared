@@ -12,8 +12,29 @@ export const TOSS_TIMEOUT_MAX_MS = 120_000;
 
 type Raw =
   | { ok: true; body: Record<string, unknown> }
-  | { ok: false; network: true; code: "TIMEOUT" | "NETWORK" }
+  | { ok: false; network: true; code: "TIMEOUT" | "NETWORK" | "BUDGET_EXCEEDED" }
   | { ok: false; network: false; status: number; code: string; message: string };
+
+/** cancelPayment 한 번의 호출 흐름(취소 + 이어지는 조회들) 전체 예산. cfg 복사본에만 붙이고(WeakMap) 공개 타입은 바꾸지 않는다. */
+interface Budget {
+  deadline: number;
+  /** 예산이 모자라 호출을 건너뛰었는지 */
+  skipped: boolean;
+}
+const budgets = new WeakMap<object, Budget>();
+
+/** budgetMs(양의 유한수)가 있으면 이 호출 흐름 전용 예산을 붙인 cfg 복사본을 돌려준다. 없으면 그대로. */
+function withBudget(cfg: TossConfig): TossConfig {
+  if (typeof cfg.budgetMs !== "number" || !Number.isFinite(cfg.budgetMs) || cfg.budgetMs <= 0) return cfg;
+
+  const copy: TossConfig = { ...cfg };
+
+  budgets.set(copy, { deadline: Date.now() + cfg.budgetMs, skipped: false });
+
+  return copy;
+}
+
+const budgetSkipped = (cfg: TossConfig): boolean => budgets.get(cfg)?.skipped === true;
 
 /** Basic 인증 헤더: base64("<시크릿키>:") */
 export function basicAuthHeader(secretKey: string): string {
@@ -47,7 +68,25 @@ async function call(cfg: TossConfig, method: "GET" | "POST", path: string, opts:
   if (cfg.expectedMode === "unchecked") assertUncheckedAllowed(cfg.baseUrl);
   else assertKeyMode(cfg.secretKey, cfg.expectedMode);
 
-  const timeoutMs = typeof cfg.timeoutMs === "number" && Number.isFinite(cfg.timeoutMs) && cfg.timeoutMs > 0 ? Math.min(cfg.timeoutMs, TOSS_TIMEOUT_MAX_MS) : TOSS_TIMEOUT_MS;
+  let timeoutMs = typeof cfg.timeoutMs === "number" && Number.isFinite(cfg.timeoutMs) && cfg.timeoutMs > 0 ? Math.min(cfg.timeoutMs, TOSS_TIMEOUT_MAX_MS) : TOSS_TIMEOUT_MS;
+
+  // 전체 예산(budgetMs): 한 호출은 예산보다 길 수 없고, 흐름 안에서는 남은 시간보다 길 수 없다. 남은 시간이 없으면 네트워크에 나가지 않는다.
+  if (typeof cfg.budgetMs === "number" && Number.isFinite(cfg.budgetMs) && cfg.budgetMs > 0) timeoutMs = Math.min(timeoutMs, cfg.budgetMs);
+
+  const budget = budgets.get(cfg);
+
+  if (budget) {
+    const left = budget.deadline - Date.now();
+
+    if (left <= 0) {
+      budget.skipped = true;
+
+      return { ok: false, network: true, code: "BUDGET_EXCEEDED" };
+    }
+
+    timeoutMs = Math.min(timeoutMs, left);
+  }
+
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   // 환경변수에 섞여 들어온 앞뒤 공백·개행은 지우고 보낸다(키 검사와 같은 기준)
@@ -93,6 +132,8 @@ async function call(cfg: TossConfig, method: "GET" | "POST", path: string, opts:
 }
 
 const NET_MSG = "결제 서버 응답을 받지 못했습니다(결과 불명).";
+/** budgetMs 를 다 써서 이어지는 조회를 하지 못했다. 취소 요청은 이미 나갔을 수 있으니 조회·재호출로 확정한다(같은 키 유지). */
+const BUDGET_OUTCOME: CancelOutcome = { kind: "uncertain", code: "BUDGET_EXCEEDED", message: "전체 호출 예산(budgetMs)을 다 써서 이어지는 조회를 하지 못했습니다(결과 불명). 조회로 확정하세요." };
 
 function toPayment(b: Record<string, unknown>): TossPayment | null {
   if (typeof b.paymentKey !== "string" || typeof b.orderId !== "string" || typeof b.status !== "string" || typeof b.totalAmount !== "number") return null;
@@ -246,7 +287,8 @@ export function createTossClient(cfg: TossConfig) {
 }
 
 /** 결제 취소 POST /v1/payments/{paymentKey}/cancel. ALREADY_CANCELED/ALREADY_REFUND 는 paymentKey 조회로 CANCELED 를 확인하면 canceled(alreadyCanceled) 로 돌려준다. */
-export async function cancelPayment(cfg: TossConfig, input: CancelInput): Promise<CancelOutcome> {
+export async function cancelPayment(cfgIn: TossConfig, input: CancelInput): Promise<CancelOutcome> {
+  const cfg = withBudget(cfgIn);
   const key = assertIdempotencyKey(input.idempotencyKey);
 
   assertPaymentKey(input.paymentKey);
@@ -294,10 +336,13 @@ export async function cancelPayment(cfg: TossConfig, input: CancelInput): Promis
       const done = await findAppliedCancel(cfg, input);
 
       if (done) return { kind: "canceled", payment: done, alreadyCanceled: true };
+      if (budgetSkipped(cfg)) return BUDGET_OUTCOME;
     }
 
     if (c === "already_canceled") {
       const l = await getPayment(cfg, input.paymentKey);
+
+      if (l.kind !== "found" && budgetSkipped(cfg)) return BUDGET_OUTCOME;
 
       if (l.kind === "found" && input.cancelAmount === undefined) {
         // 전액 요청: 이미 완전히 취소돼 있다
@@ -362,6 +407,7 @@ export async function cancelPayment(cfg: TossConfig, input: CancelInput): Promis
       // 누계가 기대와 다르다: 호출자의 alreadyCanceledTotal 이 낡았거나 같은 키의 이전 응답이다. 조회로 현재 누계를 확인해 알려준다.
       const chk = await checkPartialCancel(cfg, input);
 
+      if (chk.kind === "unknown" && budgetSkipped(cfg)) return BUDGET_OUTCOME;
       if (chk.kind === "applied") return { kind: "canceled", payment: chk.payment, alreadyCanceled: false };
       if (chk.kind === "unknown") return { kind: "uncertain", code: "CANCEL_NOT_APPLIED", message: `취소 응답의 취소 누계가 요청 금액만큼 늘지 않았고 조회로 확인하지 못했습니다(${chk.code}).` };
 

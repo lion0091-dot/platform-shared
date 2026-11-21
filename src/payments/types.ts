@@ -10,6 +10,13 @@ export interface TossConfig {
   /** 호출 제한 시간(ms). 양의 유한수가 아니면 기본값(15000)을 쓰고, 120000(TOSS_TIMEOUT_MAX_MS)보다 크면 그 값으로 줄인다. */
   timeoutMs?: number;
   /**
+   * 한 번의 호출 흐름 전체 예산(ms, 선택). 양의 유한수일 때만 적용한다. 없으면 지금처럼 호출마다 timeoutMs 만 쓴다.
+   * cancelPayment 는 취소 뒤 상황에 따라 조회를 이어서 부르는데(최대 2~3회 직렬), 예산을 주면 각 호출 제한을 남은 시간으로 줄이고
+   * 예산이 바닥나면 이어지는 조회를 하지 않고 `uncertain`(code `BUDGET_EXCEEDED`)을 돌려준다. 앱 함수 시간 제한보다 2초쯤 짧게 준다.
+   * 다른 함수(confirmPayment·getPayment 등)는 한 번만 호출하므로 호출 제한이 min(timeoutMs, budgetMs) 로 줄어드는 것 외에 달라지지 않는다.
+   */
+  budgetMs?: number;
+  /**
    * **필수.** 이 환경이 쓸 키 종류. 시크릿키 접두사(test_/live_)와 다르면 네트워크 호출 전에 KEY_MODE_MISMATCH 를 던진다.
    * 운영=`"live"`, 스테이징·리허설=`"test"`. 생략(JS 호출 포함)하면 KEY_MODE_REQUIRED 를 던진다.
    * `"unchecked"` 는 접두사가 없는 가짜 키로 **모의 서버(토스 도메인이 아닌 baseUrl)** 를 쓸 때만 허용된다 — baseUrl 이 없거나 *.tosspayments.com 이면 KEY_MODE_UNCHECKED_FORBIDDEN 을 던진다(live 키가 검사 없이 실제 토스로 나가는 것 방지).

@@ -37,6 +37,12 @@ export interface AiOpts {
   provider?: string;
   scope?: string;
   rpcNames?: Partial<AiRpcNames>;
+  /**
+   * 선택. 주어지면 record 의 상세 기록 훅(onRecorded)을 «기다리지 않고» 이 함수에 실행 Promise 를 넘긴 뒤 바로 `{ ok: true }` 를 돌려준다.
+   * 앱은 응답 뒤 실행을 보장하는 수단(Next `after()`·`waitUntil` 등)에 연결한다. 훅의 예외는 이 Promise 안에서 삼켜지고 hookError 는 이 모드의 반환값에 없다.
+   * 안 주면 지금처럼 훅을 최대 AI_HOOK_TIMEOUT_MS(2초) 기다린다.
+   */
+  scheduleHook?: (task: Promise<void>) => void;
 }
 type Ring = Keyring | (() => Keyring);
 const ringOf = (r: Ring): Keyring => (typeof r === "function" ? r() : r);
@@ -146,6 +152,21 @@ export async function recordPlatformAiUsage(sb: AiRpc, args: AiRecordArgs, meta?
     return { ok: false, code: "READ_FAILED" };
   }
   if (!hook) return { ok: true };
+  if (opts?.scheduleHook) {
+    const task = Promise.resolve()
+      .then(() => hook(args, meta))
+      .then(
+        () => undefined,
+        () => undefined,
+      );
+
+    try {
+      opts.scheduleHook(task);
+    } catch {
+      /* 예약 실패는 AI 호출·기록 결과에 영향을 주지 않는다 */
+    }
+    return { ok: true };
+  }
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const timeout = new Promise<never>((_, rej) => {
@@ -226,7 +247,7 @@ function wrapRpcError(message: string): AiSharedKeyError {
 export function createAiSharedKey(cfg: AiSharedKeyConfig) {
   if (typeof cfg.masterKeyEnv !== "string" || cfg.masterKeyEnv.trim() === "") throw new AiSharedKeyError("PLATFORM_INVALID", "마스터 키 환경변수 이름(masterKeyEnv)은 필수입니다.");
   const names = resolveRpcNames(cfg.rpcNames);
-  const opts: AiOpts = { provider: cfg.provider, scope: cfg.scope, rpcNames: cfg.rpcNames };
+  const opts: AiOpts = { provider: cfg.provider, scope: cfg.scope, rpcNames: cfg.rpcNames, scheduleHook: cfg.scheduleHook };
   const ring: Ring = cfg.ring ?? (() => loadKeyring(cfg.env ?? process.env, { current: cfg.masterKeyEnv }));
 
   async function call(fn: string, args: Record<string, unknown>): Promise<any> {
