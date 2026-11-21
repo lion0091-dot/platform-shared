@@ -2,13 +2,25 @@
 
 `@platform/shared/payments`·`@platform/shared/secrets` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
-## Unreleased — payments-outside-cancel 서브패스 (신규, 층 1)
+## v0.4.0-rc.11 — 성능·안정성 보강 (추가형, 기본 동작 불변)
 
-추가형이다(기존 API 이름·시그니처 변경 없음, 핀을 올리지 않으면 영향 없음, 의존성 0). 버전 번호는 올리지 않았다(rc.10 번호는 릴리스 승인 때). 토스 밖 취소(대시보드 직접 취소·부분 취소)를 두 앱이 **같은 규칙**으로 판정하는 순수 부분만 담는다. 웹훅 HTTP 계층·크론·DB 표·알림·화면은 앱 몫이고, 감지 결과로 결제·정산·장부 열을 자동으로 쓰지 않는다(표시·알림만). 오케스트레이션(층 2)은 포함하지 않는다.
+모두 추가형이다(기존 API 이름·시그니처·반환형 변경 없음, 새 옵션을 안 주면 기존 동작, 핀을 올리지 않으면 영향 없음, 의존성 0). 설계: `docs/쉐어드 성능 개선 설계 2026-11-21.md`.
+- `push/fcm`: 토큰 요청·발송 fetch 에 제한 시간을 둔다(`FCM_TIMEOUT_MS` = 8000, `sendFcm` 의 `deps.timeoutMs` 로 재정의, 양의 유한수가 아니면 기본값). 시간 초과는 기존처럼 `{ ok:false, gone:false }`(기기 토큰을 지우지 않음). **동작 변경**: 구글이 응답하지 않을 때 이전에는 무한정 기다렸으나 이제 8초 뒤 실패로 끝난다.
+- `push/fcm`: 콜드 상태에서 병렬 발송이 와도 OAuth 토큰 요청·서명은 서비스 계정별로 한 번만 한다(진행 중 요청 공유, 실패는 캐시하지 않음).
+- `payments`: `TossConfig.budgetMs`(선택) 추가. `cancelPayment` 가 취소 뒤 이어서 부르는 조회(최대 2~3회 직렬)까지 포함한 전체 예산이다. 예산이 바닥나면 후속 조회를 하지 않고 `uncertain`(code `BUDGET_EXCEEDED`, 기존 kind)을 돌려준다. 안 주면 이전과 같다. 다른 함수는 호출 제한이 `min(timeoutMs, budgetMs)` 로만 줄어든다. 앱은 함수 시간 제한보다 2초쯤 짧게 준다.
+- `ai-shared-key`: `scheduleHook`(선택, `AiOpts`/`AiSharedKeyConfig`) 추가. 주면 record 의 `onRecorded` 훅을 기다리지 않고 실행 Promise 를 넘긴 뒤 바로 `{ ok:true }`(앱은 `after()`·`waitUntil` 에 연결). 안 주면 이전처럼 최대 2초 기다린다.
+- 시험: fcm 타임아웃·토큰 공유 6건, budgetMs 10건, scheduleHook 5건, 공개 이름 호환 3건. 전체 28파일·1114건 통과(시험 기준값 3초 완화 포함).
+- 시험 환경: `vitest.config.ts` 가 `.claude/**`(작업 폴더 복사본)를 수집하지 않는다. Git Bash 에서는 `npx vitest run --root .` 로 돌린다.
+- `sideEffects: false` 는 적용하지 않았다(번들 전후 측정 결과 차이 없음, 설계안 §6).
+
+## v0.4.0-rc.10 — payments-outside-cancel 서브패스 (신규, 층 1)
+
+추가형이다(기존 API 이름·시그니처 변경 없음, 핀을 올리지 않으면 영향 없음, 의존성 0). 토스 밖 취소(대시보드 직접 취소·부분 취소)를 두 앱이 **같은 규칙**으로 판정하는 순수 부분만 담는다. 웹훅 HTTP 계층·크론·DB 표·알림·화면은 앱 몫이고, 감지 결과로 결제·정산·장부 열을 자동으로 쓰지 않는다(표시·알림만). 오케스트레이션(층 2)은 포함하지 않는다.
 - `@platform/shared/payments-outside-cancel`: `judgeOutsideCancel`·`confirmStable`·`fromTossPayment`·`isDueForCheck`·`orderAgeDays`·`paymentRefHash`·`cancelEventKey`·`webhookUrlToken`·`verifyWebhookUrlToken`·`extractWebhookRef`·`orderRefMatches`, 사례표 `OUTSIDE_CANCEL_CASES`(14건)·`runOutsideCancelConformance`·`referenceOutsideCancelAdapter`, 시나리오 표 `OUTSIDE_CANCEL_SCENARIOS`(6종), 타입.
 - 전액 취소 정의는 `payments/status` 의 `isFullyCanceled`·`canceledTotal`(잔액 0 인 PARTIAL_CANCELED 실측 반영)과 같다. 미트 현행 `balance<=0 → full`·`balance>=total → ok` 와 같은 결과임을 시험으로 고정했다.
 - 웹훅 보조는 본문의 상태·금액을 읽지 않고 `paymentKey`/`orderId` 만 꺼낸다(재조회한 값만 근거). 주소 토큰은 미트 현행(HMAC-SHA256 `toss-webhook:<id>`, 비밀 24자 이상)과 같은 값이다.
 - 시험: 사례 14건 + 토스 원문 경유 + 멱등·재관측 + 이상 입력(무작위 3,000건 던지지 않음) + 성능(판정 10만 건 < 1초) + 정적 점검(시계·네트워크·환경변수·DB·console 없음).
+- 표기 정정(2026-11-21): 태그 `v0.4.0-rc.10`(271e63c)이 달릴 때 `package.json` 의 version 이 `0.4.0-rc.9` 로 남아 있었다(표기만 어긋남, 동작 무관). 태그는 옮기지 않았고 다음 릴리스(rc.11)에서 맞췄다. 릴리스 전 점검: `docs/릴리스 점검 체크리스트.md`.
 
 ## v0.4.0-rc.9 — ai-usage-tenant-line 서브패스 (신규), AccountCallAction 에 ai_usage_tenant
 
