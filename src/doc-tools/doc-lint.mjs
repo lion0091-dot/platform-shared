@@ -12,7 +12,7 @@
  *     sameBlock  여러 문서의 같은 구간(시작·끝 표지)이 정규화 뒤 같은지 해시로 비교.
  *                정본 파일(저장소 밖 절대 경로, canonical)과 비교하거나(없으면 건너뛰고 문서끼리 비교로 대신) 문서끼리 비교한다(mode: auto|canonical|mutual).
  *     emphasis   이모지·강조 남발 의심(선택).
- * - 검사에서 빼는 곳(모든 줄 단위 규칙): 코드 블록, 인라인 코드, 링크 주소·URL·참조 정의, HTML 주석·태그.
+ * - 검사에서 빼는 곳(모든 행 단위 규칙): 코드 블록, 인라인 코드, 링크 주소·URL·참조 정의, HTML 주석·태그.
  * - 출력: `파일:행:규칙:발췌` + 합계. 종료 코드 0 = 위반 없음, 1 = 위반 있음, 2 = 사용법·설정 오류.
  */
 import { createHash } from "node:crypto";
@@ -72,7 +72,7 @@ export function matchFiles(all, include, exclude = []) {
 }
 
 // ── 마크다운 가림(길이·줄바꿈 유지) ─────────────────────────────
-/** 코드 블록·인라인 코드·링크 주소·URL·참조 정의·HTML 주석·태그를 공백으로 바꾼다. 줄·열 위치는 그대로다. opts.keepLinks 면 링크·태그는 남긴다(그림 참조 수집용). */
+/** 코드 블록·인라인 코드·링크 주소·URL·참조 정의·HTML 주석·태그를 공백으로 바꾼다. 행·열 위치는 그대로다. opts.keepLinks 면 링크·태그는 남긴다(그림 참조 수집용). */
 export function maskMarkdown(text, opts = {}) {
   const out = text.split("");
   const blank = (s, e) => {
@@ -123,7 +123,7 @@ export function maskMarkdown(text, opts = {}) {
   return out.join("");
 }
 
-/** « » 같은 따옴표 쌍 안쪽을 공백으로 바꾼다(같은 줄 안에서만). */
+/** « » 같은 따옴표 쌍 안쪽을 공백으로 바꾼다(같은 행 안에서만). */
 export function maskQuoted(line, pairs) {
   let s = line;
   for (const pair of pairs) {
@@ -157,6 +157,55 @@ const compile = (src, flags, name) => {
   }
 };
 
+/** 화면 표기 라벨 → 정규식. 영문·숫자로 시작/끝나는 라벨은 단어 경계를 지킨다(구절 단위, 대소문자 구분). */
+function labelRegExp(text) {
+  const pre = /^[A-Za-z0-9_]/.test(text) ? "(?<![A-Za-z0-9_])" : "";
+  const post = /[A-Za-z0-9_]$/.test(text) ? "(?![A-Za-z0-9_])" : "";
+  return new RegExp(`${pre}${escapeRe(text)}${post}`, "g");
+}
+
+/** 화면 표기 예외표 [{file | files[], text}] 검증·정규화. file·files 를 모두 생략하면 모든 파일에 적용. */
+function parseScreenLabels(list, name) {
+  if (list === undefined) return [];
+  if (!Array.isArray(list)) throw new Error(`설정 오류: ${name} 은 배열이어야 한다.`);
+  return list.map((x, i) => {
+    const filesOk = x.files === undefined || (Array.isArray(x.files) && x.files.every((f) => typeof f === "string"));
+    if (!isObj(x) || typeof x.text !== "string" || x.text === "" || (x.file !== undefined && typeof x.file !== "string") || !filesOk) {
+      throw new Error(`설정 오류: ${name}[${i}] 는 {file 또는 files[], text} 여야 한다.`);
+    }
+    const globs = [...(x.file !== undefined ? [x.file] : []), ...(x.files ?? [])];
+    return { files: globs.length === 0 ? null : globs.map(globToRegExp), re: labelRegExp(x.text) };
+  });
+}
+
+/** 예외표 적용: 해당 파일에서 라벨 문구를 같은 길이의 공백으로 바꾼다(위치 유지). */
+function applyLabels(line, file, labels) {
+  let s = line;
+  for (const lb of labels) {
+    if (lb.files !== null && !lb.files.some((r) => r.test(file))) continue;
+    s = s.replace(lb.re, (m) => " ".repeat(m.length));
+  }
+  return s;
+}
+
+/** nounJul 허용 항목 분류: 공백 없는 문자열 = 어간(단어에 포함되면 제외), 공백 포함 문자열(공백은 \s+ 로 본다)·{regex, flags} = 구절 정규식(그 구간 안의 «줄»은 제외). */
+function parseJulAllow(list) {
+  if (list === undefined) return { stems: [], phrases: [] };
+  if (!Array.isArray(list)) throw new Error("설정 오류: nounJul.allow 는 배열이어야 한다.");
+  const stems = [];
+  const phrases = [];
+  list.forEach((a, i) => {
+    if (typeof a === "string" && a !== "") {
+      if (/\s/.test(a)) phrases.push(new RegExp(a.trim().split(/\s+/).map(escapeRe).join("\\s+"), "g"));
+      else stems.push(a);
+    } else if (isObj(a) && typeof a.regex === "string") {
+      const base = a.flags ?? "u";
+      phrases.push(compile(a.regex, base.includes("g") ? base : `${base}g`, `nounJul.allow[${i}]`));
+    } else throw new Error(`설정 오류: nounJul.allow[${i}] 는 문자열 또는 {regex, flags} 여야 한다.`);
+  });
+  return { stems, phrases };
+}
+
 /** 설정 JSON 을 검증·정규화한다. 잘못되면 Error. */
 export function parseConfig(raw) {
   if (!isObj(raw)) throw new Error("설정 오류: 최상위는 객체여야 한다.");
@@ -169,7 +218,7 @@ export function parseConfig(raw) {
   const cfg = { include, exclude, rules: {} };
 
   if (on(rules.nounJul)) {
-    cfg.rules.nounJul = { ...scope(rules.nounJul), allow: strArr(rules.nounJul.allow, "nounJul.allow") };
+    cfg.rules.nounJul = { ...scope(rules.nounJul), ...parseJulAllow(rules.nounJul.allow), screenLabels: parseScreenLabels(rules.nounJul.screenLabels, "nounJul.screenLabels") };
   }
   if (on(rules.english)) {
     const r = rules.english;
@@ -181,12 +230,8 @@ export function parseConfig(raw) {
       allowPatterns: strArr(r.allowPatterns, "english.allowPatterns").map((p) => compile(p, "u", "english.allowPatterns")),
       minLength: Number.isInteger(r.minLength) && r.minLength >= 1 ? r.minLength : 2,
       quotePairs: pairs,
-      screenLabels: (Array.isArray(r.screenLabels) ? r.screenLabels : []).map((x, i) => {
-        if (!isObj(x) || typeof x.text !== "string" || x.text === "" || (x.file !== undefined && typeof x.file !== "string")) {
-          throw new Error(`설정 오류: english.screenLabels[${i}] 는 {file, text} 여야 한다.`);
-        }
-        return { file: x.file === undefined ? null : globToRegExp(x.file), text: x.text };
-      }),
+      screenLabels: parseScreenLabels(r.screenLabels, "english.screenLabels"),
+      skipForbiddenMatches: r.skipForbiddenMatches === true,
     };
   }
   if (on(rules.forbidden)) {
@@ -227,6 +272,7 @@ export function parseConfig(raw) {
           mode: g.mode === "mutual" || g.mode === "canonical" ? g.mode : "auto",
           ignoreNumbering: n.ignoreNumbering !== false,
           collapseWhitespace: n.collapseWhitespace !== false,
+          stripEmphasis: n.stripEmphasis === true,
         };
       }),
     };
@@ -238,7 +284,7 @@ export function parseConfig(raw) {
   return cfg;
 }
 
-// ── 줄 단위 규칙 ────────────────────────────────────────────────
+// ── 행 단위 규칙 ────────────────────────────────────────────────
 const HANGUL_JUL = /[가-힣]*줄[가-힣]*/g;
 const WORD = /(?<![A-Za-z0-9_])[A-Za-z][A-Za-z0-9_]*/g;
 const EMOJI = /\p{Extended_Pictographic}/u;
@@ -255,7 +301,7 @@ function chunkAround(line, index, len) {
     .replace(/[)\]}"'“”‘’«»<>,.;:!?]+$/, "");
 }
 
-/** 한 파일의 줄 단위 규칙을 돌려 위반 목록을 만든다. active = 이 파일에 켜진 규칙 키 집합. */
+/** 한 파일의 행 단위 규칙을 돌려 위반 목록을 만든다. active = 이 파일에 켜진 규칙 키 집합. */
 export function lintLines(file, text, cfg, active) {
   const v = [];
   const rawLines = text.split("\n");
@@ -265,11 +311,15 @@ export function lintLines(file, text, cfg, active) {
   for (let i = 0; i < masked.length; i++) {
     const line = masked[i];
     if (active.has("nounJul")) {
-      const { allow } = cfg.rules.nounJul;
-      for (const m of line.matchAll(HANGUL_JUL)) {
+      const { stems, phrases, screenLabels } = cfg.rules.nounJul;
+      const jline = applyLabels(line, file, screenLabels);
+      const spans = phrases.flatMap((re) => [...jline.matchAll(re)].map((p) => [p.index, p.index + p[0].length]));
+      for (const m of jline.matchAll(HANGUL_JUL)) {
         const word = m[0];
-        if (allow.some((a) => word.includes(a))) continue;
-        const before = line.slice(0, m.index);
+        if (stems.some((a) => word.includes(a))) continue;
+        const at = m.index + word.indexOf("줄");
+        if (spans.some(([s, e]) => at >= s && at < e)) continue; // 띄어 쓴 허용 구절 안의 «줄»
+        const before = jline.slice(0, m.index);
         if (/[:：]$/.test(before) || /[:：]\d+(?:[-–~]\d+)?$/.test(before)) continue; // 파일:줄 인용 형식
         add(i, "noun-jul", m.index, word.length);
       }
@@ -277,9 +327,14 @@ export function lintLines(file, text, cfg, active) {
     if (active.has("english")) {
       const r = cfg.rules.english;
       let scan = r.quotePairs.length > 0 ? maskQuoted(line, r.quotePairs) : line;
-      for (const lb of r.screenLabels) {
-        if (lb.file !== null && !lb.file.test(file)) continue;
-        scan = scan.split(lb.text).join(" ".repeat(lb.text.length));
+      scan = applyLabels(scan, file, r.screenLabels);
+      if (r.skipForbiddenMatches && cfg.rules.forbidden !== undefined) {
+        // 금지어 규칙이 이미 보고하는 구간은 영어 규칙에서 다시 세지 않는다(합계 부풀림 방지).
+        for (const p of cfg.rules.forbidden.patterns) {
+          for (const fm of line.matchAll(p.re)) {
+            if (fm[0] !== "") scan = scan.slice(0, fm.index) + " ".repeat(fm[0].length) + scan.slice(fm.index + fm[0].length);
+          }
+        }
       }
       for (const m of scan.matchAll(WORD)) {
         const w = m[0];
@@ -328,11 +383,12 @@ export function extractBlock(text, g) {
   return { lines: lines.slice(from, to).map((l) => l.replace(/\r$/, "")), line: s + 1 };
 }
 
-/** 번호 서식·공백·줄바꿈 차이를 지운 비교용 단위 목록. */
+/** 번호 서식·공백·개행 차이(옵션 stripEmphasis: 굵게 ** 와 __ · 인용 > 기호)를 지운 비교용 단위 목록. */
 export function normalizeBlock(lines, g) {
   const out = [];
   for (const raw of lines) {
     let l = raw.normalize("NFC");
+    if (g.stripEmphasis) l = l.replace(/^\s*(?:>\s*)+/, "").replace(/\*\*|__/g, "");
     if (g.ignoreNumbering) l = l.replace(NUMBERING, "");
     l = g.collapseWhitespace ? l.replace(/\s+/g, " ").trim() : l.trimEnd();
     if (l !== "") out.push(l);
@@ -368,6 +424,11 @@ export function checkSameBlock(g, files, readText, readAbs = () => null, notices
     notices.push(`${rule}: 정본 파일이 없어 정본 비교를 건너뛴다${g.mode === "canonical" ? "" : "(문서끼리 비교로 대신한다)"}`);
   }
   if (g.mode === "canonical" && canon === null) return v;
+  if (canon === null && files.length < 2) {
+    // 비교할 상대가 없으면 위반이 아니라 «건너뜀» 안내다(종료 코드·합계에 넣지 않는다).
+    notices.push(`${rule}: 건너뜀(정본·상대 문서 없음 — 비교 대상 문서 ${files.length}개)`);
+    return v;
+  }
 
   const found = [];
   for (const f of files) {
@@ -385,10 +446,6 @@ export function checkSameBlock(g, files, readText, readAbs = () => null, notices
       const d = firstDiff(f.norm, canon.norm);
       v.push({ file: f.file, line: f.line, rule, excerpt: `정본과 다름(해시 ${f.hash}≠${canon.hash}, 첫 차이 ${d.k + 1}번째 단위: ${d.text})` });
     }
-    return v;
-  }
-  if (files.length < 2) {
-    v.push({ file: files[0] ?? "(없음)", line: 1, rule, excerpt: `비교 대상 문서가 ${files.length}개뿐이다(2개 이상 필요)` });
     return v;
   }
   if (found.length === 0) return v;
@@ -470,7 +527,7 @@ export function run(argv, io = {}) {
       const key = x.rule.split(".")[0];
       byRule.set(key, (byRule.get(key) ?? 0) + 1);
     }
-    out(`doc-lint: 줄 단위 검사 파일 ${files}개, 위반 합계 ${violations.length}건${violations.length > 0 ? ` (${[...byRule].map(([k, n]) => `${k} ${n}`).join(", ")})` : ""}`);
+    out(`doc-lint: 행 단위 검사 파일 ${files}개, 위반 합계 ${violations.length}건${violations.length > 0 ? ` (${[...byRule].map(([k, n]) => `${k} ${n}`).join(", ")})` : ""}`);
     return violations.length > 0 ? 1 : 0;
   } catch (e) {
     err(e instanceof Error ? e.message : String(e));

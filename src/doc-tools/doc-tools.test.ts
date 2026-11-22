@@ -88,6 +88,42 @@ describe("doc-lint — 영어 단어", () => {
   });
 });
 
+describe("doc-lint — 허용 구절·화면 표기 예외·중복 보고", () => {
+  it("nounJul 허용: 띄어 쓴 구절(공백은 여러 칸도 허용)과 정규식 항목이 그 구간 안의 «줄»을 제외한다", () => {
+    const rules = { nounJul: { allow: ["보여 줄", "줄 운송비", { regex: "줄\\s+금액" }] } };
+    expect(lintText("화면에 보여 줄 수 있다", rules)).toEqual([]);
+    expect(lintText("화면에 보여   줄 수 있다", rules)).toEqual([]);
+    expect(lintText("지급할 줄 운송비 합계", rules)).toEqual([]);
+    expect(lintText("받을 줄 금액", rules)).toEqual([]);
+    expect(lintText("세 줄 남음", rules)).toEqual(["1:noun-jul"]);
+    expect(lintText("보여 줄 것과 세 줄", rules)).toEqual(["1:noun-jul"]);
+  });
+  it("nounJul 화면 표기 예외 {file, text} / {files[], text}", () => {
+    const rules = { nounJul: { allow: [], screenLabels: [{ file: "docs/screens/**", text: "3줄 요약" }, { files: ["docs/a.md", "docs/b.md"], text: "3줄 주문" }] } };
+    expect(lintText("화면 «3줄 요약» 표시", rules, "docs/screens/x.md")).toEqual([]);
+    expect(lintText("화면 «3줄 요약» 표시", rules, "docs/other.md")).toEqual(["1:noun-jul"]);
+    expect(lintText("화면 «3줄 주문» 표시", rules, "docs/b.md")).toEqual([]);
+    expect(lintText("화면 «3줄 주문» 표시", rules, "docs/c.md")).toEqual(["1:noun-jul"]);
+  });
+  it("english 화면 표기 예외: files 배열·구절 단위 매칭(단어 경계 지킴, 대소문자 구분)", () => {
+    const rules = { english: { screenLabels: [{ files: ["docs/a.md", "docs/b.md"], text: "Sign in" }, { text: "OK" }] } };
+    expect(lintText("Sign in 화면", rules, "docs/b.md")).toEqual([]);
+    expect(lintText("Sign in 화면", rules, "docs/c.md").length).toBe(2);
+    expect(lintText("Sign inside 화면", rules, "docs/a.md").length).toBe(2);
+    expect(lintText("sign in 화면", rules, "docs/a.md").length).toBe(2);
+    expect(lintText("OK 버튼", rules)).toEqual([]);
+    expect(lintText("OKAY 버튼", rules)).toEqual(["1:english"]);
+  });
+  it("english.skipForbiddenMatches: 금지어에 걸린 토큰은 영어 규칙에서 다시 세지 않는다", () => {
+    const forbidden = { patterns: [{ id: "x", regex: "badword" }] };
+    expect(lintText("badword 사용", { forbidden, english: {} }).sort()).toEqual(["1:english", "1:forbidden.x"]);
+    expect(lintText("badword 사용", { forbidden, english: { skipForbiddenMatches: true } })).toEqual(["1:forbidden.x"]);
+  });
+  it("그림 대체 글(alt)·이미지 행도 행 규칙의 검사 대상이다", () => {
+    expect(lintText("![세 줄 화면](img/a.png)", { nounJul: { allow: [] } })).toEqual(["1:noun-jul"]);
+  });
+});
+
 describe("doc-lint — 금지어·강조", () => {
   it("금지어 정규식: 본문은 가림 뒤, raw 는 원문 기준", () => {
     const rules = { forbidden: { patterns: [{ id: "x", regex: "비밀단어" }, { id: "r", regex: "원문단어", raw: true }] } };
@@ -134,7 +170,7 @@ describe("doc-lint — 같은 블록 일치", () => {
     expect(run(root, group(g)).violations).toEqual([]);
     expect(run(root, group({ ...g, includeStart: true })).violations.length).toBe(1);
   });
-  it("표지가 없는 문서·비교 대상이 1개뿐인 경우도 위반으로 알린다", () => {
+  it("표지가 없는 문서는 위반이고, 비교 대상이 1개뿐이면 위반이 아니라 «건너뜀» 안내다(합계·종료 코드에 넣지 않음)", () => {
     const root = tmp();
     put(root, "docs/a.md", block(["가"]));
     put(root, "docs/b.md", "표지 없음");
@@ -142,7 +178,31 @@ describe("doc-lint — 같은 블록 일치", () => {
     expect(r.violations.map((v) => `${v.file}:${v.excerpt}`)).toContain("docs/b.md:시작·끝 표지를 찾지 못했다");
     const solo = tmp();
     put(solo, "docs/a.md", block(["가"]));
-    expect(run(solo, group()).violations[0].excerpt).toContain("2개 이상");
+    const s = run(solo, group());
+    expect(s.violations).toEqual([]);
+    expect(s.notices[0]).toContain("건너뜀(정본·상대 문서 없음");
+    put(solo, "cfg.json", JSON.stringify({ include: ["docs/**/*.md"], rules: { sameBlock: { groups: [group()] } } }));
+    const out: string[] = [];
+    expect(lint.run(["--config", path.join(solo, "cfg.json"), "--root", solo], { out: (x) => out.push(x) })).toBe(0);
+    expect(out[out.length - 1]).toContain("위반 합계 0건");
+    expect(out[0]).toContain("안내:");
+  });
+  it("정규화 옵션 stripEmphasis: 굵게·인용 기호 차이를 무시한다(기본은 끔)", () => {
+    const root = tmp();
+    put(root, "docs/a.md", block(["(1) 개인정보는 **업무에서만** 씁니다.", "(2) 누설하지 않습니다."]));
+    put(root, "docs/b.md", block(["> (1) 개인정보는 업무에서만 씁니다.", "> (2) 누설하지 않습니다."]));
+    put(root, "docs/c.md", block(["(1) 개인정보는 __업무에서만__ 씁니다.", "(2) 누설하지 않습니다."]));
+    expect(run(root, group()).violations.length).toBeGreaterThan(0);
+    expect(run(root, group({ normalize: { stripEmphasis: true } })).violations).toEqual([]);
+  });
+  it("행 단위 검사 요약 문구에 «줄» 명사가 없다", () => {
+    const root = tmp();
+    put(root, "docs/a.md", "정상\n");
+    put(root, "cfg.json", JSON.stringify({ include: ["docs/**/*.md"], rules: { nounJul: { allow: [] } } }));
+    const out: string[] = [];
+    lint.run(["--config", path.join(root, "cfg.json"), "--root", root], { out: (x) => out.push(x) });
+    expect(out.join("\n")).toContain("행 단위 검사 파일 1개");
+    expect(out.join("\n")).not.toContain("줄");
   });
   it("정본(저장소 밖 절대 경로): 있으면 정본과 비교, 없으면 건너뛰고 문서끼리 비교", () => {
     const root = tmp();
@@ -286,6 +346,35 @@ describe("figure-stale", () => {
     const m = manifestOf([entry("o", "docs/img/orders.png", ["app/orders.tsx"], c1)]);
     const r = fig.checkFigures({ manifest: m, repo, docs: ["docs/**/*.md"], unregistered: true });
     expect(r.unregistered.map((u) => `${u.doc}:${u.line}:${u.path}`)).toEqual(["docs/guide.md:2:docs/img/new.png", "docs/guide.md:3:docs/img/html.png"]);
+  });
+  it("imageBase: 참조 경로를 문서 위치가 아니라 지정 디렉터리 기준으로 해석한다(매니페스트·옵션·CLI)", () => {
+    const { repo, c1 } = setup();
+    put(repo, "docs/sub/deep/guide.md", "![주문](images/orders.png)\n![새것](images/new.png)\n![절대](/docs/images/detail.png)\n");
+    put(repo, "docs/images/orders.png", "png");
+    const figures = [entry("o", "docs/images/orders.png", ["app/orders.tsx"], c1), entry("d", "docs/images/detail.png", ["app/detail.tsx"], c1)];
+    const base = { manifest: fig.parseManifest({ figures }), repo, docs: ["docs/sub/**/*.md"], unregistered: true };
+    // 기본(문서 위치 기준): 세 참조 모두 docs/sub/deep/ 아래로 읽혀 «미등록»이 부풀려진다
+    expect(fig.checkFigures(base).unregistered.map((u) => u.path)).toEqual(["docs/sub/deep/images/orders.png", "docs/sub/deep/images/new.png"]);
+    // 옵션: 지정 디렉터리 기준, 앞이 / 인 경로는 저장소 루트 기준
+    expect(fig.checkFigures({ ...base, imageBase: "docs" }).unregistered.map((u) => u.path)).toEqual(["docs/images/new.png"]);
+    expect(fig.checkFigures({ ...base, imageBase: "docs/" }).unregistered.length).toBe(1);
+    // 매니페스트 최상위 imageBase
+    const viaManifest = fig.checkFigures({ ...base, manifest: fig.parseManifest({ imageBase: "docs", figures }) });
+    expect(viaManifest.unregistered.map((u) => u.path)).toEqual(["docs/images/new.png"]);
+    // CLI 옵션
+    const mf = path.join(repo, "m.json");
+    writeFileSync(mf, JSON.stringify(figures), "utf8");
+    const out: string[] = [];
+    fig.run(["--manifest", mf, "--repo", repo, "--docs", "docs/sub/**/*.md", "--unregistered", "--image-base", "docs"], { out: (s) => out.push(s) });
+    expect(out.join("\n")).toContain("docs/images/new.png");
+    expect(out.join("\n")).not.toContain("deep/images");
+  });
+  it("route·sources 가 비어 있어도 매니페스트는 받아 주고 «미확인»으로 분류한다", () => {
+    const { repo, c1 } = setup();
+    const m = fig.parseManifest([{ id: "a", file: "docs/img/orders.png", route: "", sources: [], capturedCommit: c1 }, { id: "b", file: "docs/img/detail.png", capturedCommit: c1 }]);
+    const r = fig.checkFigures({ manifest: m, repo });
+    expect(r.unknown.map((u) => u.why)).toEqual(["sources 없음", "sources 없음"]);
+    expect(r.stale).toEqual([]);
   });
   it("매니페스트 검증: id·file 필수, 중복 거부, 배열 또는 figures 객체", () => {
     expect(() => fig.parseManifest({})).toThrow(/배열/);

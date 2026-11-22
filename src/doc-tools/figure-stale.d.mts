@@ -5,6 +5,7 @@ export interface FigureEntry {
   capturedCommit: string;
 }
 export interface FigureManifest {
+  imageBase?: string | null;
   figures: FigureEntry[];
   globalWatch: string[];
 }
@@ -18,8 +19,8 @@ export interface FigureResult {
   total: number;
 }
 export function parseManifest(raw: unknown): FigureManifest;
-export function collectRefs(repo: string, docGlobs: string[]): { doc: string; line: number; path: string }[];
-export function checkFigures(args: { manifest: FigureManifest; repo: string; docs?: string[]; unregistered?: boolean; globalWatch?: string[] }): FigureResult;
+export function collectRefs(repo: string, docGlobs: string[], imageBase?: string | null): { doc: string; line: number; path: string }[];
+export function checkFigures(args: { manifest: FigureManifest; repo: string; docs?: string[]; unregistered?: boolean; globalWatch?: string[]; imageBase?: string | null }): FigureResult;
 export function formatReport(res: FigureResult): string[];
 export function parseArgs(argv: string[]): any;
 export function run(argv: string[], io?: { out?: (s: string) => void; err?: (s: string) => void }): number;

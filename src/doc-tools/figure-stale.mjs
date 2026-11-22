@@ -3,7 +3,7 @@
  * 그림 변경 감지(figure-stale). Node 내장 모듈과 git 만 쓴다(의존성 0). 저장소를 읽기만 한다(아무것도 고치지 않는다).
  *
  *   node figure-stale.mjs --manifest FILE --repo DIR [--images-stale OUT [--stale-paths]]
- *                         [--docs GLOB ... --unregistered] [--global-watch PATH ...] [--exit-zero]
+ *                         [--docs GLOB ... --unregistered [--image-base DIR]] [--global-watch PATH ...] [--exit-zero]
  *
  * 매니페스트(JSON): 배열 `[{ id, file, route, role, seed, sources[], capturedCommit, note }]` 이거나
  *   `{ figures: [...], globalWatch: [경로...] }`. 기준 키는 그림 파일 경로(file)이다(id·file 중복은 오류).
@@ -13,8 +13,10 @@
  *   어긋남 후보  sources 가 capturedCommit 이후(작업 폴더 포함) git 에서 바뀌었다 — 바뀐 파일을 보여 준다.
  *   정상         건수만 출력한다.
  * 전역 감시(globalWatch 또는 --global-watch): 공용 문구 사전처럼 모든 화면에 영향을 주는 파일. 어떤 그림의 촬영 시점 이후 바뀌었으면
- *   «전체 재확인 권고» 한 줄만 낸다(그림을 개별로 어긋남 처리하지 않는다).
+ *   «전체 재확인 권고» 한 행만 낸다(그림을 개별로 어긋남 처리하지 않는다).
  * 미등록 그림(--unregistered, --docs 필요): 문서의 `![](경로)`·`<img src>` 참조 중 매니페스트에 없는 그림을 목록으로 낸다.
+ *   참조 경로는 기본으로 «그 문서가 있는 디렉터리» 기준이다. imageBase(매니페스트 최상위 `imageBase` 또는 --image-base, 저장소 기준 디렉터리)를
+ *   주면 «지정한 디렉터리» 기준으로 해석한다(예: 모든 문서가 `images/…` 를 같은 폴더 기준으로 쓰는 경우). 앞이 `/` 인 경로는 항상 저장소 루트 기준이다.
  * images-stale 출력: 어긋남 후보 + 누락 그림의 파일 이름을 한 행에 하나씩(기본 이름만, --stale-paths 면 저장소 기준 경로).
  * 종료 코드: 0 = 목록 없음(또는 --exit-zero), 1 = 누락·미확인·어긋남·미등록 중 하나라도 있음, 2 = 사용법·매니페스트·git 오류.
  */
@@ -57,16 +59,19 @@ export function parseManifest(raw) {
     const sources = Array.isArray(x.sources) && x.sources.every((s) => typeof s === "string" && s !== "") ? x.sources.map(posix) : null;
     return { id: x.id, file, sources, capturedCommit: typeof x.capturedCommit === "string" ? x.capturedCommit.trim() : "" };
   });
-  return { figures, globalWatch: watch.map(posix) };
+  const imageBase = isObj(raw) && typeof raw.imageBase === "string" && raw.imageBase !== "" ? trimSlash(posix(raw.imageBase)) : null;
+  return { figures, globalWatch: watch.map(posix), imageBase };
 }
 
+const trimSlash = (p) => p.replace(/\/+$/, "");
+
 /** 그림 참조 수집: 문서의 `![](경로)`·`<img src>` → { doc, line, path(저장소 기준) } */
-export function collectRefs(repo, docGlobs) {
+export function collectRefs(repo, docGlobs, imageBase = null) {
   const refs = [];
   for (const doc of matchFiles(listFiles(repo), docGlobs)) {
     const text = readFileSync(path.join(repo, doc), "utf8");
     const lines = maskMarkdown(text, { keepLinks: true }).split("\n");
-    const dir = path.posix.dirname(doc);
+    const dir = imageBase !== null ? imageBase : path.posix.dirname(doc);
     lines.forEach((line, i) => {
       const found = [...line.matchAll(/!\[[^\]]*\]\(\s*<?([^)\s>]+)/g)].map((m) => m[1]);
       found.push(...[...line.matchAll(/<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']/gi)].map((m) => m[1]));
@@ -87,7 +92,7 @@ export function collectRefs(repo, docGlobs) {
 }
 
 /** 검사 본체. { stale, unknown, missing, unregistered, globalChanged, ok, total } */
-export function checkFigures({ manifest, repo, docs = [], unregistered = false, globalWatch = [] }) {
+export function checkFigures({ manifest, repo, docs = [], unregistered = false, globalWatch = [], imageBase = null }) {
   if (!gitOk(repo, ["rev-parse", "--git-dir"])) throw new Error(`git 저장소가 아니다: ${repo}`);
   const res = { stale: [], unknown: [], missing: [], unregistered: [], globalChanged: null, ok: 0, total: manifest.figures.length };
   const known = new Set();
@@ -128,7 +133,8 @@ export function checkFigures({ manifest, repo, docs = [], unregistered = false, 
   }
   if (unregistered && docs.length > 0) {
     const seen = new Set();
-    for (const r of collectRefs(repo, docs)) {
+    const base = imageBase !== null ? trimSlash(posix(imageBase)) : manifest.imageBase ?? null;
+    for (const r of collectRefs(repo, docs, base)) {
       if (known.has(r.path) || seen.has(`${r.doc}:${r.path}`)) continue;
       seen.add(`${r.doc}:${r.path}`);
       res.unregistered.push(r);
@@ -162,10 +168,10 @@ export function formatReport(res) {
   return out;
 }
 
-const USAGE = "사용법: figure-stale --manifest 매니페스트.json --repo 저장소 [--images-stale 출력파일 [--stale-paths]] [--docs GLOB ... --unregistered] [--global-watch 경로 ...] [--exit-zero]";
+const USAGE = "사용법: figure-stale --manifest 매니페스트.json --repo 저장소 [--images-stale 출력파일 [--stale-paths]] [--docs GLOB ... --unregistered [--image-base 디렉터리]] [--global-watch 경로 ...] [--exit-zero]";
 
 export function parseArgs(argv) {
-  const o = { manifest: null, repo: null, imagesStale: null, stalePaths: false, docs: [], unregistered: false, globalWatch: [], exitZero: false };
+  const o = { manifest: null, repo: null, imagesStale: null, stalePaths: false, docs: [], unregistered: false, globalWatch: [], imageBase: null, exitZero: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--manifest") o.manifest = argv[++i];
@@ -174,6 +180,7 @@ export function parseArgs(argv) {
     else if (a === "--stale-paths") o.stalePaths = true;
     else if (a === "--docs") o.docs.push(argv[++i]);
     else if (a === "--unregistered") o.unregistered = true;
+    else if (a === "--image-base") o.imageBase = argv[++i];
     else if (a === "--global-watch") o.globalWatch.push(argv[++i]);
     else if (a === "--exit-zero") o.exitZero = true;
     else throw new Error(`알 수 없는 인자: ${a}\n${USAGE}`);
@@ -190,7 +197,7 @@ export function run(argv, io = {}) {
     const o = parseArgs(argv);
     const raw = JSON.parse(readFileSync(path.resolve(o.manifest), "utf8").replace(/^﻿/, ""));
     const repo = path.resolve(o.repo);
-    const res = checkFigures({ manifest: parseManifest(raw), repo, docs: o.docs, unregistered: o.unregistered, globalWatch: o.globalWatch });
+    const res = checkFigures({ manifest: parseManifest(raw), repo, docs: o.docs, unregistered: o.unregistered, globalWatch: o.globalWatch, imageBase: o.imageBase });
     for (const l of formatReport(res)) out(l);
     if (o.imagesStale !== null) {
       const names = [...res.stale, ...res.missing].map((x) => (o.stalePaths ? x.file : path.posix.basename(x.file)));
