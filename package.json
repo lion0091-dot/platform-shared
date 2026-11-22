@@ -1,6 +1,6 @@
-{
+﻿{
   "name": "@platform/shared",
-  "version": "0.4.0-rc.12",
+  "version": "0.4.0-rc.13",
   "private": true,
   "description": "플랫폼 공용 코드(wholesale·shipping-prj 등). 소스(.ts)를 그대로 배포하고 쓰는 앱이 빌드한다(Next transpilePackages).",
   "type": "module",
@@ -23,7 +23,13 @@
     "./ai-usage-line": "./src/ai-usage-line/index.ts",
     "./ai-usage-tenant-line": "./src/ai-usage-tenant-line/index.ts",
     "./payments-outside-cancel": "./src/payments-outside-cancel/index.ts",
-    "./withholding": "./src/withholding/index.ts"
+    "./withholding": "./src/withholding/index.ts",
+    "./doc-tools/doc-lint": "./src/doc-tools/doc-lint.mjs",
+    "./doc-tools/figure-stale": "./src/doc-tools/figure-stale.mjs"
+  },
+  "bin": {
+    "doc-lint": "./src/doc-tools/doc-lint.mjs",
+    "figure-stale": "./src/doc-tools/figure-stale.mjs"
   },
   "files": ["src"],
   "scripts": {
