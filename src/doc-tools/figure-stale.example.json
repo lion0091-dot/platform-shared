@@ -1,0 +1,15 @@
+{
+  "globalWatch": ["lib/i18n/labels.ts"],
+  "figures": [
+    {
+      "id": "orders-list",
+      "file": "docs/images/orders-list.png",
+      "route": "/orders",
+      "role": "manager",
+      "seed": "scripts/seed-demo.sql",
+      "sources": ["app/orders/page.tsx", "components/OrderTable.tsx"],
+      "capturedCommit": "0123abc",
+      "note": "필터 없는 기본 목록"
+    }
+  ]
+}

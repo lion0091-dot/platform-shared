@@ -1,0 +1,34 @@
+{
+  "include": ["docs/**/*.md"],
+  "exclude": ["docs/archive/**"],
+  "rules": {
+    "nounJul": {
+      "allow": ["줄이", "줄어", "줄인", "줄입", "줄다", "줄지", "줄면", "줄도", "돌려줄", "건네줄", "알려줄", "보내줄", "나눠줄", "챙겨줄"]
+    },
+    "english": {
+      "skipQuoted": true,
+      "minLength": 2,
+      "allowWords": ["api", "url", "pdf", "csv", "id", "sql", "ok"],
+      "allowPatterns": ["^[0-9a-f]{7,40}$", "^v?\\d+(\\.\\d+)+(-[A-Za-z0-9.]+)?$", "^[\\w./-]+\\.(md|ts|tsx|js|mjs|json|sql|png|pdf)$", "/"],
+      "screenLabels": [{ "file": "docs/**", "text": "Sign in" }]
+    },
+    "forbidden": {
+      "patterns": [{ "id": "example", "regex": "TODO|FIXME", "message": "미완성 표시" }]
+    },
+    "sameBlock": {
+      "groups": [
+        {
+          "id": "shared-text",
+          "files": ["docs/manual/*.md"],
+          "start": "<!-- BEGIN SHARED-TEXT -->",
+          "end": "<!-- END SHARED-TEXT -->",
+          "includeStart": false,
+          "includeEnd": false,
+          "canonical": "C:/path/outside/repo/shared-text.txt",
+          "mode": "auto"
+        }
+      ]
+    },
+    "emphasis": { "enabled": false, "emoji": true, "maxBoldPerLine": 3 }
+  }
+}

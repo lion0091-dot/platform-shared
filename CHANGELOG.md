@@ -2,6 +2,13 @@
 
 `@platform/shared/payments`·`@platform/shared/secrets` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
+## v0.4.0-rc.13 — doc-tools: 문서 검사기·그림 변경 감지 (신규, 개발 도구)
+
+추가형이다(기존 export 불변, 의존성 0, Node 내장 모듈과 git 만 사용, 비밀·환경변수·크론·DB 없음). 읽기 전용이며 `--fix` 는 없다. 규칙·허용 목록은 전부 설정 파일에 두고 코드에는 특정 서비스·문구가 없다. 사용법: `src/doc-tools/README.md`.
+- `@platform/shared/doc-tools/doc-lint`(bin `doc-lint`): «줄» 명사·영어 단어(허용 단어·패턴·화면 표기 예외표·« » 인용 제외)·금지어 정규식·같은 블록 일치(시작·끝 표지, 번호·공백 정규화, 저장소 밖 정본 또는 문서끼리 비교)·이모지·강조 남발(선택). 출력 `파일:행:규칙:발췌` + 합계, 위반 있으면 종료 코드 1.
+- `@platform/shared/doc-tools/figure-stale`(bin `figure-stale`): 그림 매니페스트의 `sources` 가 `capturedCommit` 이후 바뀌었는지(어긋남 후보)·미확인·누락·미등록 그림·전역 감시 파일(전체 재확인 권고 한 줄)·`images-stale.txt` 출력.
+- 시험: 합성 파일·임시 git 저장소만 사용(29건).
+
 ## v0.4.0-rc.12 — withholding 서브패스 (신규)·ai-guard 계좌 규칙 /3
 
 두 묶음이다. ① withholding 은 신규 서브패스라 **추가형**(기존 export 불변, 핀을 올리지 않으면 영향 없음, 의존성 0). ② ai-guard 계좌 규칙 `/3` 은 가림 범위를 **늘리기만** 하며 **동작 변경**이 있다(아래 «동작 주의»). 핀 승격은 각 앱 담당이 태그 뒤에 한다.
