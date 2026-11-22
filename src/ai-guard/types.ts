@@ -3,8 +3,8 @@
  * 설계: docs/design-ai-egress-guard-2026-11.md (로컬 초안). 실제 개인정보·키는 어디에도 없다.
  */
 
-/** 규칙을 바꾸면 올린다. /2: 숫자 옆 유니코드 대시·비ASCII 숫자 정규화, 이름 단서어 추가, 겹친 스팬의 처리 방식 합치기(가장 엄격한 쪽), 주소 단서 경고. */
-export const GUARD_RULES_VERSION = "ai-guard-rules/2";
+/** 규칙을 바꾸면 올린다. /3: 계좌·카드 후보의 제외 규칙 축소(앞 쉼표, 뒤 띄어 쓴 단위·둥글지 않은 숫자, 20YYMMDD 10·12자리 예외 제거, 14자리는 정상 일시만 예외). /2: 숫자 옆 유니코드 대시·비ASCII 숫자 정규화, 이름 단서어 추가, 겹친 스팬의 처리 방식 합치기(가장 엄격한 쪽), 주소 단서 경고. */
+export const GUARD_RULES_VERSION = "ai-guard-rules/3";
 
 /** 가리지는 않지만 알려 주는 신호(닫힌 집합). 값·위치는 담지 않는다. */
 export type GuardWarning = "ADDRESS_CUE";
