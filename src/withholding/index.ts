@@ -11,8 +11,8 @@
  *  예: 191,760 → 6,328 = 5,752 + 576 / 100,000 → 3,300 / 99,999 → 3,299.
  *
  * 이 함수는 «대상이면 계산»만 한다. 대상 판정(계산서 발행 여부·사업자번호 유무)은 앱 몫이다.
- * 음수는 받지 않는다: 기준 구현의 코드 식은 내림(Math.floor), DB 식은 0 방향 절사라 음수에서 서로 달라지므로 한쪽으로 고르지 않고 거부한다
- * (취소 반대 행은 호출 쪽이 절댓값으로 계산해 부호를 붙인다).
+ * **음수 입력은 거부한다(확정)**: 기준 구현의 코드 식은 내림(Math.floor), DB 식은 0 방향 절사라 음수에서 서로 달라지므로 한쪽으로 고르지 않는다.
+ * 취소 반대 행처럼 부호가 필요한 경우 **호출 쪽이 절댓값으로 계산한 뒤 부호를 붙인다**.
  */
 
 /** 총률(1000분율): 3.3% */
@@ -48,7 +48,9 @@ export function computePersonalWithholding(supply: number): PersonalWithholdingR
  *  ① 사업자번호가 있으면 사업자(원천징수 없음)
  *  ② 없으면 세금계산서(계산서) 발행 여부를 본다. 있으면 사업자(원천징수 없음)
  *  ③ 둘 다 없으면 개인(3.3% 원천징수 대상)
- * 사업자번호는 «있는지 없는지»만 받는다(형식·유효성 검증은 앱 몫). 문자열은 앞뒤 공백을 뺀 뒤 비어 있지 않으면 «있음».
+ * 사업자번호는 «있는지 없는지»만 받는다(이 함수는 형식을 검증하지 않는다). 문자열은 앞뒤 공백을 뺀 뒤 비어 있지 않으면 «있음».
+ * **사용 지침: 판정에는 «유효한 번호가 있는지» 불리언(`isValidBusinessNumber(값)` 의 결과)을 넘길 것. 형식이 틀린 번호는 사업자로 보지 말 것** —
+ * 값이 있다는 이유만으로 문자열을 그대로 넘기면 형식이 틀린 번호도 사업자로 판정되어 원천징수가 빠진다.
  * 입력 의미: `true`/값 있는 문자열 = 있음, `false`/빈 문자열/`null`(저장소에 값이 없음) = 없음, `undefined`(아직 모름) = 불명.
  * **주의: 아직 조회하지 않았거나 값을 모르는 항목은 반드시 `undefined` 로 넘길 것. `null` 은 «없음»으로 판정된다**(둘 다 `null` 이면 개인으로 판정됨).
  * 불명이면 임의로 단정하지 않고 NEEDS_CHECK 를 돌려준다(자동 단정 금지). 다른 쪽 근거만으로 결과가 정해지면 그대로 정한다
@@ -92,4 +94,23 @@ export function judgeWithholdingTarget(input: WithholdingTargetInput): Withholdi
   if (bn === undefined) return { decision: "NEEDS_CHECK", personal: null, reason: "BUSINESS_NUMBER_UNKNOWN" };
   if (inv === undefined) return { decision: "NEEDS_CHECK", personal: null, reason: "TAX_INVOICE_UNKNOWN" };
   return { decision: "PERSONAL", personal: true, reason: "NO_BUSINESS_NO_INVOICE" };
+}
+
+const BIZ_WEIGHTS = [1, 3, 7, 1, 3, 7, 1, 3, 5];
+
+/**
+ * 사업자등록번호 형식 검증(순수 함수). 숫자 10자리 + 검증 자리(체크섬)가 맞으면 true.
+ * 하이픈·공백은 지우고 본다(`123-45-67891`, `123 45 67891` 모두 가능). 문자열이 아닌 값(null·undefined·숫자 등)·자리수 오류·
+ * 숫자 아닌 글자·체크섬 불일치·전부 0 은 false. 번호가 «실제로 등록된 사업자인지»는 확인하지 못한다(형식만 본다).
+ * 체크섬: 앞 9자리에 가중치 1·3·7·1·3·7·1·3·5 를 곱해 합하고, 9번째 자리×5 를 10 으로 나눈 몫을 더한 뒤, (10 − 합 % 10) % 10 이 10번째 자리와 같아야 한다.
+ */
+export function isValidBusinessNumber(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const digits = value.replace(/[-\s]/g, "");
+  if (!/^\d{10}$/.test(digits) || digits === "0000000000") return false;
+  const d = [...digits].map(Number);
+  let sum = 0;
+  for (let i = 0; i < 9; i++) sum += d[i] * BIZ_WEIGHTS[i];
+  sum += Math.floor((d[8] * 5) / 10);
+  return (10 - (sum % 10)) % 10 === d[9];
 }

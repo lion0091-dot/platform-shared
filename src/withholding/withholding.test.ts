@@ -93,3 +93,46 @@ describe("개인 차주 대상 판정 — 사업자번호 → 계산서 → 개�
     expect(judgeWithholdingTarget({ businessNumber: "아무거나", taxInvoice: false }).reason).toBe("BUSINESS_NUMBER");
   });
 });
+
+import { isValidBusinessNumber } from "./index";
+
+describe("사업자번호 형식 검증 — 합성 번호", () => {
+  // 모두 합성값이다(체크섬 계산으로 만든 번호이며 실제 사업자와 무관).
+  const valid = ["1234567891", "123-45-67891", "123 45 67891", " 123-45-67891 ", "1-2-3-4-5-6-7-8-9-1", "1000000009", "9999999997"];
+  const invalid = [
+    "1234567890", // 체크섬 불일치
+    "123-45-67892",
+    "123456789", // 9자리
+    "12345678910", // 11자리
+    "", // 빈 값
+    "   ",
+    "abcdefghij",
+    "123-45-6789a",
+    "123/45/67891", // 허용하지 않는 구분자
+    "0000000000", // 전부 0
+    "１２３４５６７８９１", // 전각 숫자
+  ];
+  it("유효한 합성 번호: 하이픈·공백은 지우고 본다", () => {
+    for (const v of valid) expect(isValidBusinessNumber(v), v).toBe(true);
+  });
+  it("형식·체크섬 오류와 경계는 false", () => {
+    for (const v of invalid) expect(isValidBusinessNumber(v), v).toBe(false);
+  });
+  it("문자열이 아닌 값은 던지지 않고 false", () => {
+    for (const v of [null, undefined, 1234567891, true, {}, [], ["1234567891"]]) expect(isValidBusinessNumber(v)).toBe(false);
+  });
+  it("체크섬 규칙 전수 확인: 앞 9자리마다 맞는 마지막 자리는 정확히 하나", () => {
+    for (let n = 0; n < 2000; n++) {
+      const head = String(n * 499 + 1).padStart(9, "0").slice(0, 9);
+      const matches = [..."0123456789"].filter((c) => isValidBusinessNumber(head + c));
+      if (head === "000000000") expect(matches).toEqual([]);
+      else expect(matches.length, head).toBe(1);
+    }
+  });
+  it("판정 함수와의 연결: 유효 번호 불리언을 넘기면 사업자, 틀린 번호 불리언은 없음으로 판정된다", () => {
+    expect(judgeWithholdingTarget({ businessNumber: isValidBusinessNumber("123-45-67891"), taxInvoice: false }).decision).toBe("BUSINESS");
+    expect(judgeWithholdingTarget({ businessNumber: isValidBusinessNumber("123-45-67890"), taxInvoice: false }).decision).toBe("PERSONAL");
+    // 틀린 번호 문자열을 그대로 넘기면 «있음» 으로 보아 사업자로 판정된다 — 그래서 불리언을 넘기라고 안내한다
+    expect(judgeWithholdingTarget({ businessNumber: "123-45-67890", taxInvoice: false }).decision).toBe("BUSINESS");
+  });
+});
