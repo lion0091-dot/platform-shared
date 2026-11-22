@@ -206,6 +206,27 @@ function applyLabels(line, file, labels) {
   return s;
 }
 
+/** 행 단위 예외 [{file | files[], text | regex, flags}] 검증·정규화. text 는 행에 포함되면, regex 는 행에서 일치하면 그 행을 규칙에서 제외한다. */
+function parseRowAllow(list, name) {
+  if (list === undefined) return [];
+  if (!Array.isArray(list)) throw new Error(`설정 오류: ${name} 은 배열이어야 한다.`);
+  return list.map((x, i) => {
+    const filesOk = x.files === undefined || (Array.isArray(x.files) && x.files.every((f) => typeof f === "string"));
+    const hasText = isObj(x) && typeof x.text === "string" && x.text !== "";
+    const hasRegex = isObj(x) && typeof x.regex === "string";
+    if (!isObj(x) || hasText === hasRegex || (x.file !== undefined && typeof x.file !== "string") || !filesOk) {
+      throw new Error(`설정 오류: ${name}[${i}] 는 {file 또는 files[], text 또는 regex(둘 중 하나)} 여야 한다.`);
+    }
+    const globs = [...(x.file !== undefined ? [x.file] : []), ...(x.files ?? [])];
+    return { files: globs.length === 0 ? null : globs.map(globToRegExp), text: hasText ? x.text : null, re: hasRegex ? compile(x.regex, x.flags ?? "u", `${name}[${i}]`) : null };
+  });
+}
+
+/** 이 행(원문)이 해당 금지어 항목의 예외인가. */
+function rowAllowed(p, file, rawLine) {
+  return p.allow.some((a) => (a.files === null || a.files.some((r) => r.test(file))) && (a.text !== null ? rawLine.includes(a.text) : a.re.test(rawLine)));
+}
+
 /** nounJul 허용 항목 분류: 공백 없는 문자열 = 어간(단어에 포함되면 제외), 공백 포함 문자열(공백은 \s+ 로 본다)·{regex, flags} = 구절 정규식(그 구간 안의 «줄»은 제외). */
 function parseJulAllow(list) {
   if (list === undefined) return { stems: [], phrases: [] };
@@ -260,7 +281,12 @@ export function parseConfig(raw) {
       patterns: list.map((p, i) => {
         if (!isObj(p) || typeof p.regex !== "string") throw new Error(`설정 오류: forbidden.patterns[${i}].regex 가 없다.`);
         const base = p.flags ?? "u";
-        return { id: typeof p.id === "string" && p.id !== "" ? p.id : String(i + 1), re: compile(p.regex, base.includes("g") ? base : `${base}g`, `forbidden.patterns[${i}]`), raw: p.raw === true };
+        return {
+          id: typeof p.id === "string" && p.id !== "" ? p.id : String(i + 1),
+          re: compile(p.regex, base.includes("g") ? base : `${base}g`, `forbidden.patterns[${i}]`),
+          raw: p.raw === true,
+          allow: parseRowAllow(p.allow, `forbidden.patterns[${i}].allow`),
+        };
       }),
     };
   }
@@ -351,6 +377,7 @@ export function lintLines(file, text, cfg, active) {
       if (r.skipForbiddenMatches && cfg.rules.forbidden !== undefined) {
         // 금지어 규칙이 이미 보고하는 구간은 영어 규칙에서 다시 세지 않는다(합계 부풀림 방지).
         for (const p of cfg.rules.forbidden.patterns) {
+          if (rowAllowed(p, file, rawLines[i])) continue; // 예외 행은 금지어가 보고하지 않으므로 영어 규칙이 그대로 본다
           for (const fm of line.matchAll(p.re)) {
             if (fm[0] !== "") scan = scan.slice(0, fm.index) + " ".repeat(fm[0].length) + scan.slice(fm.index + fm[0].length);
           }
@@ -367,6 +394,7 @@ export function lintLines(file, text, cfg, active) {
     }
     if (active.has("forbidden")) {
       for (const p of cfg.rules.forbidden.patterns) {
+        if (rowAllowed(p, file, rawLines[i])) continue; // 행 단위 예외(화면 문구·오류 메시지 인용 행 등)
         const src = p.raw ? rawLines[i] : line;
         p.re.lastIndex = 0;
         for (let m = p.re.exec(src); m !== null; m = p.re.exec(src)) {

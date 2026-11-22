@@ -19,7 +19,7 @@ node <도구 경로>/src/doc-tools/doc-lint.mjs --config doc-lint.json [--root .
 |---|---|---|
 | `nounJul` | `줄` 명사(행)를 잡는다. `파일:줄`·`파일:12줄` 인용 형식은 제외 | `allow`, `screenLabels` (아래) |
 | `english` | 코드·링크 밖 영어 단어 | `allowWords`(약어), `allowPatterns`, `screenLabels`, `skipQuoted`, `skipForbiddenMatches`, `minLength` |
-| `forbidden` | 금지어 정규식 | `patterns: [{id, regex, flags, raw}]` (`raw`: 코드 안까지 원문 기준) |
+| `forbidden` | 금지어 정규식 | `patterns: [{id, regex, flags, raw, allow}]` (`raw`: 코드 안까지 원문 기준, `allow`: 행 단위 예외) |
 | `sameBlock` | 여러 문서의 같은 구간이 같은지 | `groups: [{id, files, start, end, includeStart, includeEnd, canonical, mode, normalize}]` |
 | `emphasis` | 이모지·굵게 남발 의심(선택) | `emoji`, `maxBoldPerLine` |
 
@@ -30,6 +30,7 @@ node <도구 경로>/src/doc-tools/doc-lint.mjs --config doc-lint.json [--root .
 - **`english.skipQuoted`**: `true` 면 « » 안을 검사하지 않는다. 배열(`["«»", "“”"]`)로 따옴표 쌍을 직접 정할 수 있다. **`english.skipForbiddenMatches`**: `true` 면 `forbidden` 에 걸린 구간은 영어 규칙에서 다시 세지 않는다(합계 부풀림 방지).
 - **`allowPatterns`**: 단어 하나와 그 주변 «공백으로 끊긴 덩어리» 양쪽에 적용한다(그래서 파일 이름·경로·커밋 해시·버전을 패턴 하나로 허용할 수 있다).
 - **`sameBlock`**: `start`·`end` 는 문자열 또는 `{regex, flags}`(행 단위로 찾는다). `includeStart`·`includeEnd` 로 표지 행을 구간에 넣을지 정한다. 비교 전에 번호 서식(`(1)`·`1.`·`1)`)·공백·개행 차이를 지운다. 끝 표지(`end`)를 생략하거나 `null`·`"EOF"`·`{"eof": true}` 로 적으면 **문서 끝까지**다(문자 그대로 EOF 행을 끝 표지로 쓰려면 `{"regex": "^EOF$"}`). `normalize`: `ignoreNumbering`·`collapseWhitespace`(기본 켬), **`stripQuote`**(기본 끔: 인용 상자 `> ` 접두어 제거), **`stripEmphasis`**(기본 끔: 굵게 `**`·`__` 를 지우고 `stripQuote` 도 함께 적용 — 서약서처럼 서식만 다른 문서의 오탐 해소). `canonical`(저장소 밖 절대 경로)이 있으면 정본과 비교하고, 없으면 «정본 파일이 없어 건너뜀» 안내 후 문서끼리 비교한다. `mode`: `auto`(기본)·`canonical`·`mutual`. 비교할 상대가 없으면(대상 문서가 1개이고 정본도 없음) 위반이 아니라 «건너뜀» 안내만 내고 합계·종료 코드에 넣지 않는다. **정본 문구는 공개 저장소에 두지 않는다.**
+- **`forbidden` 행 단위 예외(`allow`)**: 항목별로 `{ "file" 또는 "files": [...], "text" 또는 "regex" }` 에 일치하는 행(원문 한 행)은 그 항목에서만 제외한다(화면 문구·오류 메시지 인용 행, 서약서 전문 행). `text` 는 행에 포함되면, `regex` 는 행에서 일치하면 예외다. 예: `{ "id": "process-press", "regex": "눌러", "allow": [{ "files": ["docs/screens/**"], "text": "«눌러 주세요»" }, { "file": "docs/pledge.md", "regex": "^\\s*\\(\\d+\\)" }] }`.
 - **금지 표현 묶음 예시**(과정 서술): `doc-lint.example.json` 의 `forbidden.patterns` 에 `확인하지 못|확인 못`, `코드 판독|코드만 읽`, `로컬에서 확인`, `눌러`, `작성 시점|검수 때` 를 넣어 두었다. 본문에 «어떻게 알아냈는지·확인하지 못한 것»이 섞이지 않게 하는 용도다. `눌러` 는 범위가 넓어 «눌러 주세요» 같은 정상 안내도 걸릴 수 있으니 오탐이면 정규식을 좁힌다(예: `눌러 (?:보|봤|본)`). 서비스별 금지어는 도구가 아니라 각자의 설정에 둔다.
 - 출력: **맨 위 한 행에 도구 버전과 설정 해시**(`doc-lint v<버전> · 설정 sha256:<8자리>`), 이어서 `파일:행:규칙:발췌` 와 합계(`안내:` 로 시작하는 행은 합계에 들어가지 않는다). 종료 코드 0 = 위반 없음, 1 = 위반 있음, 2 = 사용법·설정 오류.
 - **영어 단어 요약·`--summary`**: 영어 위반이 있으면 합계 앞에 `영어 단어 요약(상위 20, 서로 다른 단어 N개, 위반 M건)` 이 단어별 빈도(대소문자 합침, 빈도순)로 나온다. `--summary` 를 주면 영어 위반을 행별로 늘어놓지 않고 빈도순 전체 단어 목록만 보여 준다(허용 목록을 정할 때 쓴다). 합계·종료 코드에는 그대로 들어간다.

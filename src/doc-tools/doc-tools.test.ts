@@ -120,6 +120,17 @@ describe("doc-lint — 허용 구절·화면 표기 예외·중복 보고", () =
     expect(lintText("badword 사용", { forbidden, english: {} }).sort()).toEqual(["1:english", "1:forbidden.x"]);
     expect(lintText("badword 사용", { forbidden, english: { skipForbiddenMatches: true } })).toEqual(["1:forbidden.x"]);
   });
+  it("forbidden.allow: 항목별 행 단위 예외({file|files, text|regex})는 그 항목·그 행에서만 제외한다", () => {
+    const allow = [{ files: ["docs/screens/**"], text: "«눌러 주세요»" }, { file: "docs/pledge.md", regex: "^\\s*\\(\\d+\\)" }];
+    const rules = { forbidden: { patterns: [{ id: "press", regex: "눌러", allow }, { id: "other", regex: "비밀" }] } };
+    expect(lintText("버튼 «눌러 주세요» 표시", rules, "docs/screens/a.md")).toEqual([]);
+    expect(lintText("버튼 «눌러 주세요» 표시", rules, "docs/guide/a.md")).toEqual(["1:forbidden.press"]); // 다른 파일
+    expect(lintText("(1) 버튼을 눌러", rules, "docs/pledge.md")).toEqual([]);
+    expect(lintText("버튼을 눌러", rules, "docs/pledge.md")).toEqual(["1:forbidden.press"]); // 정규식에 안 맞는 행
+    expect(lintText("«눌러 주세요» 비밀", rules, "docs/screens/a.md")).toEqual(["1:forbidden.other"]); // 다른 항목은 그대로
+    expect(() => cfgOf({ forbidden: { patterns: [{ regex: "x", allow: [{ text: "a", regex: "b" }] }] } })).toThrow(/allow/);
+    expect(() => cfgOf({ forbidden: { patterns: [{ regex: "x", allow: [{ file: "a" }] }] } })).toThrow(/allow/);
+  });
   it("그림 대체 글(alt)·이미지 행도 행 규칙의 검사 대상이다", () => {
     expect(lintText("![세 줄 화면](img/a.png)", { nounJul: { allow: [] } })).toEqual(["1:noun-jul"]);
   });
