@@ -3,6 +3,7 @@ export interface DocLintViolation {
   line: number;
   rule: string;
   excerpt: string;
+  word?: string;
 }
 export interface DocLintConfig {
   include: string[];
@@ -20,5 +21,7 @@ export function extractBlock(text: string, g: any): { lines: string[]; line: num
 export function normalizeBlock(lines: string[], g: any): string[];
 export function checkSameBlock(g: any, files: string[], readText: (f: string) => string, readAbs?: (p: string) => string | null, notices?: string[]): DocLintViolation[];
 export function runDocLint(cfg: DocLintConfig, rootDir: string): { violations: DocLintViolation[]; notices: string[]; files: number };
-export function parseArgs(argv: string[]): { config: string; root: string };
+export function parseArgs(argv: string[]): { config: string; root: string; summary: boolean };
+export function toolHeader(name: string, rawText: string): string;
+export function summarizeWords(violations: DocLintViolation[]): [string, number][];
 export function run(argv: string[], io?: { out?: (s: string) => void; err?: (s: string) => void }): number;

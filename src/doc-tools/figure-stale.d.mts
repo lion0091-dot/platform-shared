@@ -2,6 +2,8 @@ export interface FigureEntry {
   id: string;
   file: string;
   sources: string[] | null;
+  screen?: string | null;
+  badScreen?: boolean;
   capturedCommit: string;
 }
 export interface FigureManifest {
@@ -18,6 +20,7 @@ export interface FigureResult {
   ok: number;
   total: number;
 }
+export function buildInit(args: { repo: string; docs: string[]; imageBase?: string | null; existingRaw?: unknown }): { manifest: unknown; added: number; kept: number };
 export function parseManifest(raw: unknown): FigureManifest;
 export function collectRefs(repo: string, docGlobs: string[], imageBase?: string | null): { doc: string; line: number; path: string }[];
 export function checkFigures(args: { manifest: FigureManifest; repo: string; docs?: string[]; unregistered?: boolean; globalWatch?: string[]; imageBase?: string | null }): FigureResult;

@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import * as lint from "./doc-lint.mjs";
 import * as fig from "./figure-stale.mjs";
@@ -124,6 +125,79 @@ describe("doc-lint — 허용 구절·화면 표기 예외·중복 보고", () =
   });
 });
 
+describe("doc-lint — 보강(헤더·요약·표지·접두 일치·금지 표현 예시)", () => {
+  const exec = (argv: string[]) => {
+    const out: string[] = [];
+    const code = lint.run(argv, { out: (s) => out.push(s), err: () => undefined });
+    return { code, out };
+  };
+  it("출력 맨 위에 도구 버전과 설정 해시를 보여 주고, 설정이 바뀌면 해시가 바뀐다", () => {
+    const root = tmp();
+    put(root, "docs/a.md", "정상\n");
+    put(root, "c1.json", JSON.stringify({ include: ["docs/**/*.md"], rules: { forbidden: { patterns: [{ regex: "x" }] } } }));
+    put(root, "c2.json", JSON.stringify({ include: ["docs/**/*.md"], rules: { forbidden: { patterns: [{ regex: "y" }] } } }));
+    const a = exec(["--config", path.join(root, "c1.json"), "--root", root]).out[0];
+    const a2 = exec(["--config", path.join(root, "c1.json"), "--root", root]).out[0];
+    const b = exec(["--config", path.join(root, "c2.json"), "--root", root]).out[0];
+    expect(a).toMatch(/^doc-lint v\S+ · 설정 sha256:[0-9a-f]{8}$/);
+    expect(a2).toBe(a);
+    expect(b).not.toBe(a);
+  });
+  it("영어 단어 요약: 빈도순·상위 20개, --summary 는 영어 행 목록을 접고 합계는 유지한다", () => {
+    const root = tmp();
+    const words = Array.from({ length: 25 }, (_, i) => `word${String.fromCharCode(97 + (i % 26))}${String.fromCharCode(97 + Math.floor(i / 26))}`);
+    put(root, "docs/a.md", `${words.join(" ")}\nwordaa wordaa Wordaa\n`);
+    put(root, "cfg.json", JSON.stringify({ include: ["docs/**/*.md"], rules: { english: {} } }));
+    const base = ["--config", path.join(root, "cfg.json"), "--root", root];
+    const normal = exec(base);
+    expect(normal.code).toBe(1);
+    const head = normal.out.find((l) => l.startsWith("영어 단어 요약")) ?? "";
+    expect(head).toContain("상위 20");
+    expect(head).toContain("서로 다른 단어 25개");
+    expect(normal.out.some((l) => l.includes("wordaa×4"))).toBe(true);
+    expect(normal.out.filter((l) => l.startsWith("docs/a.md:")).length).toBe(28);
+    const summary = exec([...base, "--summary"]);
+    expect(summary.out.filter((l) => l.startsWith("docs/a.md:"))).toEqual([]);
+    expect(summary.out.find((l) => l.startsWith("영어 단어 요약"))).toContain("빈도순 전체");
+    expect(summary.out[summary.out.length - 1]).toContain("위반 합계 28건");
+    expect(lint.summarizeWords([{ file: "a", line: 1, rule: "english", excerpt: "", word: "Api" }, { file: "a", line: 2, rule: "english", excerpt: "", word: "api" }])).toEqual([["api", 2]]);
+  });
+  it("sameBlock: 끝 표지를 생략하거나 EOF 로 적으면 문서 끝까지, stripQuote 는 인용 기호만 무시한다", () => {
+    const root = tmp();
+    put(root, "docs/a.md", "앞글\n## 유의\n(1) 가나다\n(2) 라마바\n");
+    put(root, "docs/b.md", "머리말 다름\n## 유의\n> 1. 가나다\n> 2. 라마바\n");
+    const g = { id: "g", files: ["docs/*.md"], start: { regex: "^## 유의" } };
+    const runG = (extra: Record<string, unknown>) => lint.runDocLint(cfgOf({ sameBlock: { groups: [{ ...g, ...extra }] } }), root).violations;
+    expect(runG({ normalize: { stripQuote: true } })).toEqual([]);
+    expect(runG({ end: "EOF", normalize: { stripQuote: true } })).toEqual([]);
+    expect(runG({ end: null, normalize: { stripQuote: true } })).toEqual([]);
+    expect(runG({ end: { eof: true }, normalize: { stripQuote: true } })).toEqual([]);
+    expect(runG({}).length).toBe(1); // 인용 기호가 달라 다름
+    put(root, "docs/b.md", "머리말 다름\n## 유의\n> 1. **가나다**\n> 2. 라마바\n");
+    expect(runG({ normalize: { stripQuote: true } }).length).toBe(1); // 굵게는 stripEmphasis 가 있어야 무시
+    expect(runG({ normalize: { stripEmphasis: true } })).toEqual([]);
+  });
+  it("screenLabels match: exact(기본) · prefix(라벨로 시작하는 단어 전체) · contains(경계 없이)", () => {
+    const labels = (match?: string) => ({ english: { screenLabels: [{ text: "Order", ...(match ? { match } : {}) }] } });
+    expect(lintText("Orders 화면", labels()).length).toBe(1); // exact: Orders 는 다른 단어
+    expect(lintText("Orders 화면", labels("prefix"))).toEqual([]);
+    expect(lintText("Order 화면", labels("prefix"))).toEqual([]);
+    expect(lintText("MyOrder 화면", labels("prefix")).length).toBe(1); // prefix 도 앞 단어 경계는 지킨다
+    expect(lintText("XOrder 화면", labels("contains"))).toEqual([]);
+    expect(() => cfgOf({ english: { screenLabels: [{ text: "x", match: "bad" }] } })).toThrow(/match/);
+    const jul = { nounJul: { allow: [], screenLabels: [{ text: "3줄 요약", match: "prefix" }] } };
+    expect(lintText("«3줄 요약본» 표시", jul)).toEqual([]);
+  });
+  it("설정 예 파일의 금지 표현 묶음(과정 서술)이 해당 문구를 잡는다", () => {
+    const example = JSON.parse(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "doc-lint.example.json"), "utf8"));
+    const cfg = lint.parseConfig({ include: ["**/*.md"], rules: { forbidden: example.rules.forbidden } });
+    const phrases = ["확인하지 못했다", "확인 못 함", "코드 판독 결과", "코드만 읽고", "로컬에서 확인함", "버튼을 눌러 보니", "작성 시점 기준", "검수 때 발견", "TODO 남김"];
+    for (const p of phrases) expect(lint.lintLines("docs/a.md", p, cfg, new Set(["forbidden"])).length, p).toBeGreaterThan(0);
+    expect(lint.lintLines("docs/a.md", "정상적인 안내 문장입니다", cfg, new Set(["forbidden"]))).toEqual([]);
+    expect(() => lint.parseConfig(example)).not.toThrow();
+  });
+});
+
 describe("doc-lint — 금지어·강조", () => {
   it("금지어 정규식: 본문은 가림 뒤, raw 는 원문 기준", () => {
     const rules = { forbidden: { patterns: [{ id: "x", regex: "비밀단어" }, { id: "r", regex: "원문단어", raw: true }] } };
@@ -185,7 +259,7 @@ describe("doc-lint — 같은 블록 일치", () => {
     const out: string[] = [];
     expect(lint.run(["--config", path.join(solo, "cfg.json"), "--root", solo], { out: (x) => out.push(x) })).toBe(0);
     expect(out[out.length - 1]).toContain("위반 합계 0건");
-    expect(out[0]).toContain("안내:");
+    expect(out[1]).toContain("안내:");
   });
   it("정규화 옵션 stripEmphasis: 굵게·인용 기호 차이를 무시한다(기본은 끔)", () => {
     const root = tmp();
@@ -241,7 +315,8 @@ describe("doc-lint — CLI·설정", () => {
     put(root, "cfg.json", JSON.stringify({ include: ["docs/**/*.md"], rules: { nounJul: { allow: JUL_ALLOW } } }));
     const bad = exec(["--config", path.join(root, "cfg.json"), "--root", root]);
     expect(bad.code).toBe(1);
-    expect(bad.out[0]).toBe("docs/a.md:2:noun-jul:세 줄 남음");
+    expect(bad.out[0]).toMatch(/^doc-lint v\S+ · 설정 sha256:[0-9a-f]{8}$/);
+    expect(bad.out[1]).toBe("docs/a.md:2:noun-jul:세 줄 남음");
     expect(bad.out[bad.out.length - 1]).toContain("위반 합계 1건");
     put(root, "docs/a.md", "정상 문장\n");
     expect(exec(["--config", path.join(root, "cfg.json"), "--root", root]).code).toBe(0);
@@ -262,7 +337,8 @@ describe("doc-lint — CLI·설정", () => {
     expect(exec([]).code).toBe(2);
     expect(exec(["--x"]).code).toBe(2);
     expect(() => lint.parseConfig({ rules: {} })).toThrow(/include/);
-    expect(() => lint.parseConfig({ include: ["a"], rules: { sameBlock: { groups: [{ files: ["a"], start: "s" }] } } })).toThrow(/end/);
+    expect(() => lint.parseConfig({ include: ["a"], rules: { sameBlock: { groups: [{ files: ["a"] }] } } })).toThrow(/start/);
+    expect(() => lint.parseConfig({ include: ["a"], rules: { sameBlock: { groups: [{ files: ["a"], start: "s" }] } } })).not.toThrow(); // 끝 표지 생략 = 문서 끝까지
   });
 });
 
@@ -376,6 +452,59 @@ describe("figure-stale", () => {
     expect(r.unknown.map((u) => u.why)).toEqual(["sources 없음", "sources 없음"]);
     expect(r.stale).toEqual([]);
   });
+  it("screens: 화면 단위 소스 그룹을 여러 그림이 함께 참조한다(그룹 소스가 바뀌면 모두 어긋남, 없는 screen 은 미확인)", () => {
+    const { repo, c1 } = setup();
+    const m = fig.parseManifest({
+      screens: { orders: ["app/orders.tsx", "lib/labels.ts"] },
+      figures: [
+        { id: "a", file: "docs/img/orders.png", screen: "orders", capturedCommit: c1 },
+        { id: "b", file: "docs/img/detail.png", screen: "orders", sources: ["app/detail.tsx"], capturedCommit: c1 },
+        { id: "c", file: "docs/img/orders.png2", screen: "nope", sources: ["app/detail.tsx"], capturedCommit: c1 },
+      ],
+    });
+    expect(m.figures[1].sources).toEqual(["app/detail.tsx", "app/orders.tsx", "lib/labels.ts"]);
+    expect(m.figures[2].badScreen).toBe(true);
+    put(repo, "docs/img/orders.png2", "png");
+    commitAll(repo, "add img");
+    expect(fig.checkFigures({ manifest: m, repo }).ok).toBe(2);
+    put(repo, "app/orders.tsx", "v2");
+    commitAll(repo, "orders changed");
+    const r = fig.checkFigures({ manifest: m, repo });
+    expect(r.stale.map((s) => s.id)).toEqual(["a", "b"]);
+    expect(r.unknown.map((u) => `${u.id}:${u.why}`)).toEqual(["c:screen 정의 없음: nope"]);
+    expect(() => fig.parseManifest({ screens: { x: "app" }, figures: [] })).toThrow(/screens\.x/);
+  });
+  it("--init: 문서의 그림 참조에서 뼈대를 만들고(id·커밋·장), 기존 항목은 보존하며 다시 돌려도 중복이 없다", () => {
+    const { repo, c1 } = setup();
+    put(repo, "docs/guide.md", ["# 1장 주문", "![목록](img/orders.png)", "## 2장 상세", "![상세](img/detail.png)", "![같은 이름](other/detail.png)", "![없는 그림](img/none.png)", "![외부](https://example.test/x.png)"].join("\n"));
+    put(repo, "docs/other/detail.png", "png");
+    const c2 = commitAll(repo, "guide");
+    const mf = path.join(repo, "figures.json");
+    // 기존 매니페스트: 한 항목은 사람이 채운 값, screens·globalWatch 도 있다
+    writeFileSync(mf, JSON.stringify({ globalWatch: ["lib/labels.ts"], screens: { s: ["app/orders.tsx"] }, figures: [{ id: "orders", file: "docs/img/orders.png", screen: "s", capturedCommit: c1, note: "손으로 쓴 메모" }] }), "utf8");
+    const out: string[] = [];
+    const args = ["--init", "--manifest", mf, "--repo", repo, "--docs", "docs/guide.md"];
+    expect(fig.run(args, { out: (s) => out.push(s) })).toBe(0);
+    expect(out[1]).toContain("새로 추가 3건, 기존 보존 1건");
+    const saved = JSON.parse(readFileSync(mf, "utf8"));
+    expect(saved.globalWatch).toEqual(["lib/labels.ts"]);
+    expect(saved.screens).toEqual({ s: ["app/orders.tsx"] });
+    expect(saved.figures[0]).toEqual({ id: "orders", file: "docs/img/orders.png", screen: "s", capturedCommit: c1, note: "손으로 쓴 메모" });
+    const added = saved.figures.slice(1);
+    expect(added.map((f: { id: string }) => f.id)).toEqual(["detail", "detail-2", "none"]);
+    expect(added[0]).toMatchObject({ file: "docs/img/detail.png", capturedCommit: c1, note: "2장 상세", sources: [], route: "", screen: "" });
+    expect(added[1]).toMatchObject({ file: "docs/other/detail.png", capturedCommit: c2 });
+    expect(added[2]).toMatchObject({ file: "docs/img/none.png", capturedCommit: "" });
+    // 다시 돌려도 같은 결과(중복 없음)
+    const again: string[] = [];
+    fig.run(args, { out: (s) => again.push(s) });
+    expect(again[1]).toContain("새로 추가 0건, 기존 보존 4건");
+    // 매니페스트가 없으면 새로 만든다(객체 형식), --docs 없이는 사용법 오류
+    const fresh = path.join(repo, "fresh.json");
+    expect(fig.run(["--init", "--manifest", fresh, "--repo", repo, "--docs", "docs/guide.md"], { out: () => undefined })).toBe(0);
+    expect(JSON.parse(readFileSync(fresh, "utf8")).figures.length).toBe(4);
+    expect(fig.run(["--init", "--manifest", fresh, "--repo", repo], { err: () => undefined })).toBe(2);
+  });
   it("매니페스트 검증: id·file 필수, 중복 거부, 배열 또는 figures 객체", () => {
     expect(() => fig.parseManifest({})).toThrow(/배열/);
     expect(() => fig.parseManifest([{ id: "a" }])).toThrow(/id·file/);
@@ -410,6 +539,8 @@ describe("figure-stale", () => {
     writeFileSync(mf, JSON.stringify([entry("o", "docs/img/orders.png", ["app/orders.tsx"], c1)]), "utf8");
     const out: string[] = [];
     expect(fig.run(["--manifest", mf, "--repo", repo], { out: (s) => out.push(s) })).toBe(0);
-    expect(out).toEqual(["figure-stale: 전체 1건 중 정상 1건, 어긋남 후보 0건, 미확인 0건, 누락 0건"]);
+    expect(out.length).toBe(2);
+    expect(out[0]).toMatch(/^figure-stale v\S+ · 설정 sha256:[0-9a-f]{8}$/);
+    expect(out[1]).toBe("figure-stale: 전체 1건 중 정상 1건, 어긋남 후보 0건, 미확인 0건, 누락 0건");
   });
 });

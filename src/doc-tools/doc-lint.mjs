@@ -48,7 +48,21 @@ export function globToRegExp(glob) {
 }
 
 function escapeRe(s) {
-  return s.replace(/[.*+?^${}()|[\]\\\-]/g, "\\$&");
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+const escapeClass = (s) => s.replace(/[\]\\^-]/g, "\\$&");
+
+const TOOL_VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version ?? "?";
+  } catch {
+    return "?";
+  }
+})();
+
+/** 출력 맨 위 한 행: 도구 이름·버전과 입력 파일(설정·매니페스트)의 해시. 같은 결과를 다시 만들 때 쓴 도구·설정을 확인한다. */
+export function toolHeader(name, rawText) {
+  return `${name} v${TOOL_VERSION} · 설정 sha256:${createHash("sha256").update(rawText).digest("hex").slice(0, 8)}`;
 }
 
 /** rootDir 아래 모든 파일의 상대 경로('/' 구분). node_modules·.git 은 들어가지 않는다. */
@@ -129,7 +143,7 @@ export function maskQuoted(line, pairs) {
   for (const pair of pairs) {
     const [open, close] = [...pair];
     if (open === undefined || close === undefined) continue;
-    const re = new RegExp(`${escapeRe(open)}[^${escapeRe(close)}\\n]*${escapeRe(close)}`, "g");
+    const re = new RegExp(`${escapeRe(open)}[^${escapeClass(close)}\\n]*${escapeRe(close)}`, "g");
     s = s.replace(re, (m) => m.replace(/[^\r\n]/g, " "));
   }
   return s;
@@ -158,10 +172,13 @@ const compile = (src, flags, name) => {
 };
 
 /** 화면 표기 라벨 → 정규식. 영문·숫자로 시작/끝나는 라벨은 단어 경계를 지킨다(구절 단위, 대소문자 구분). */
-function labelRegExp(text) {
+function labelRegExp(text, match = "exact") {
+  const word = "[\\p{L}\\p{N}_]";
   const pre = /^[A-Za-z0-9_]/.test(text) ? "(?<![A-Za-z0-9_])" : "";
+  if (match === "contains") return new RegExp(escapeRe(text), "gu"); // 단어 경계 없이 어디서든
+  if (match === "prefix") return new RegExp(`${pre}${escapeRe(text)}${word}*`, "gu"); // 라벨로 시작하는 단어 전체
   const post = /[A-Za-z0-9_]$/.test(text) ? "(?![A-Za-z0-9_])" : "";
-  return new RegExp(`${pre}${escapeRe(text)}${post}`, "g");
+  return new RegExp(`${pre}${escapeRe(text)}${post}`, "gu"); // exact(기본): 구절 단위, 영문·숫자 끝은 단어 경계
 }
 
 /** 화면 표기 예외표 [{file | files[], text}] 검증·정규화. file·files 를 모두 생략하면 모든 파일에 적용. */
@@ -174,7 +191,8 @@ function parseScreenLabels(list, name) {
       throw new Error(`설정 오류: ${name}[${i}] 는 {file 또는 files[], text} 여야 한다.`);
     }
     const globs = [...(x.file !== undefined ? [x.file] : []), ...(x.files ?? [])];
-    return { files: globs.length === 0 ? null : globs.map(globToRegExp), re: labelRegExp(x.text) };
+    if (x.match !== undefined && !["exact", "prefix", "contains"].includes(x.match)) throw new Error(`설정 오류: ${name}[${i}].match 는 exact|prefix|contains 여야 한다.`);
+    return { files: globs.length === 0 ? null : globs.map(globToRegExp), re: labelRegExp(x.text, x.match ?? "exact") };
   });
 }
 
@@ -263,7 +281,8 @@ export function parseConfig(raw) {
         return {
           id: typeof g.id === "string" && g.id !== "" ? g.id : String(i + 1),
           start: marker(g.start, `sameBlock.groups[${i}].start`),
-          end: marker(g.end, `sameBlock.groups[${i}].end`),
+          // 끝 표지를 생략(null)하거나 "EOF"(또는 {eof:true})로 적으면 문서 끝까지다.
+          end: g.end === undefined || g.end === null || g.end === "EOF" || (isObj(g.end) && g.end.eof === true) ? { kind: "eof" } : marker(g.end, `sameBlock.groups[${i}].end`),
           includeStart: g.includeStart === true,
           includeEnd: g.includeEnd === true,
           files,
@@ -273,6 +292,7 @@ export function parseConfig(raw) {
           ignoreNumbering: n.ignoreNumbering !== false,
           collapseWhitespace: n.collapseWhitespace !== false,
           stripEmphasis: n.stripEmphasis === true,
+          stripQuote: n.stripQuote === true || n.stripEmphasis === true,
         };
       }),
     };
@@ -306,7 +326,7 @@ export function lintLines(file, text, cfg, active) {
   const v = [];
   const rawLines = text.split("\n");
   const masked = maskMarkdown(text).split("\n");
-  const add = (i, rule, col, len) => v.push({ file, line: i + 1, rule, excerpt: excerptOf(rawLines[i], col, len) });
+  const add = (i, rule, col, len, word) => v.push({ file, line: i + 1, rule, excerpt: excerptOf(rawLines[i], col, len), ...(word !== undefined ? { word } : {}) });
 
   for (let i = 0; i < masked.length; i++) {
     const line = masked[i];
@@ -342,7 +362,7 @@ export function lintLines(file, text, cfg, active) {
         if (r.allowWords.has(w.toLowerCase())) continue;
         const chunk = chunkAround(scan, m.index, w.length);
         if (r.allowPatterns.some((p) => p.test(w) || p.test(chunk))) continue;
-        add(i, "english", m.index, w.length);
+        add(i, "english", m.index, w.length, w);
       }
     }
     if (active.has("forbidden")) {
@@ -376,19 +396,21 @@ export function extractBlock(text, g) {
   const lines = text.split("\n");
   const s = lines.findIndex((l) => markerHit(g.start, l));
   if (s < 0) return null;
-  const e = lines.findIndex((l, i) => i > s && markerHit(g.end, l));
+  const eof = g.end.kind === "eof";
+  const e = eof ? lines.length : lines.findIndex((l, i) => i > s && markerHit(g.end, l));
   if (e < 0) return null;
   const from = g.includeStart ? s : s + 1;
-  const to = g.includeEnd ? e + 1 : e;
+  const to = g.includeEnd && !eof ? e + 1 : e;
   return { lines: lines.slice(from, to).map((l) => l.replace(/\r$/, "")), line: s + 1 };
 }
 
-/** 번호 서식·공백·개행 차이(옵션 stripEmphasis: 굵게 ** 와 __ · 인용 > 기호)를 지운 비교용 단위 목록. */
+/** 번호 서식·공백·개행 차이(옵션 stripQuote: 인용 > 기호, stripEmphasis: 굵게 ** 와 __ 및 인용 기호)를 지운 비교용 단위 목록. */
 export function normalizeBlock(lines, g) {
   const out = [];
   for (const raw of lines) {
     let l = raw.normalize("NFC");
-    if (g.stripEmphasis) l = l.replace(/^\s*(?:>\s*)+/, "").replace(/\*\*|__/g, "");
+    if (g.stripQuote) l = l.replace(/^\s*(?:>\s*)+/, "");
+    if (g.stripEmphasis) l = l.replace(/\*\*|__/g, "");
     if (g.ignoreNumbering) l = l.replace(NUMBERING, "");
     l = g.collapseWhitespace ? l.replace(/\s+/g, " ").trim() : l.trimEnd();
     if (l !== "") out.push(l);
@@ -499,18 +521,32 @@ export function runDocLint(cfg, rootDir) {
   return { violations, notices, files: lineFiles.size };
 }
 
-const USAGE = "사용법: doc-lint --config 설정.json [--root 디렉터리]";
+const USAGE = "사용법: doc-lint --config 설정.json [--root 디렉터리] [--summary]";
 
 export function parseArgs(argv) {
-  const o = { config: null, root: process.cwd() };
+  const o = { config: null, root: process.cwd(), summary: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--config") o.config = argv[++i];
     else if (a === "--root") o.root = argv[++i];
+    else if (a === "--summary") o.summary = true;
     else throw new Error(`알 수 없는 인자: ${a}\n${USAGE}`);
   }
   if (!o.config || !o.root) throw new Error(USAGE);
   return o;
+}
+
+const WORD_SUMMARY_TOP = 20;
+
+/** 영어 위반의 단어별 빈도(대소문자 합침, 빈도 내림차순 → 단어 오름차순). [[단어, 횟수], ...] */
+export function summarizeWords(violations) {
+  const count = new Map();
+  for (const x of violations) {
+    if (x.rule !== "english" || x.word === undefined) continue;
+    const k = x.word.toLowerCase();
+    count.set(k, (count.get(k) ?? 0) + 1);
+  }
+  return [...count].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 }
 
 export function run(argv, io = {}) {
@@ -518,10 +554,19 @@ export function run(argv, io = {}) {
   const err = io.err ?? ((s) => process.stderr.write(`${s}\n`));
   try {
     const o = parseArgs(argv);
-    const cfg = parseConfig(JSON.parse(stripBom(readFileSync(path.resolve(o.config), "utf8"))));
+    const rawConfig = stripBom(readFileSync(path.resolve(o.config), "utf8"));
+    const cfg = parseConfig(JSON.parse(rawConfig));
     const { violations, notices, files } = runDocLint(cfg, path.resolve(o.root));
+    out(toolHeader("doc-lint", rawConfig));
     for (const n of notices) out(`안내: ${n}`);
-    for (const x of violations) out(`${x.file}:${x.line}:${x.rule}:${x.excerpt}`);
+    // --summary: 영어 위반은 행별로 늘어놓지 않고 단어별 빈도만 보여 준다(허용 목록을 정할 때 쓴다). 합계에는 그대로 들어간다.
+    for (const x of violations) if (!(o.summary && x.rule === "english")) out(`${x.file}:${x.line}:${x.rule}:${x.excerpt}`);
+    const words = summarizeWords(violations);
+    if (words.length > 0) {
+      const shown = o.summary ? words.slice(0, 500) : words.slice(0, WORD_SUMMARY_TOP);
+      out(`영어 단어 요약(${o.summary ? "빈도순 전체" : `상위 ${WORD_SUMMARY_TOP}`}, 서로 다른 단어 ${words.length}개, 위반 ${violations.filter((x) => x.rule === "english").length}건):`);
+      for (let k = 0; k < shown.length; k += 10) out(`  ${shown.slice(k, k + 10).map(([w, n]) => `${w}×${n}`).join(" ")}`);
+    }
     const byRule = new Map();
     for (const x of violations) {
       const key = x.rule.split(".")[0];

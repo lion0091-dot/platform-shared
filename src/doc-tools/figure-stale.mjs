@@ -4,6 +4,7 @@
  *
  *   node figure-stale.mjs --manifest FILE --repo DIR [--images-stale OUT [--stale-paths]]
  *                         [--docs GLOB ... --unregistered [--image-base DIR]] [--global-watch PATH ...] [--exit-zero]
+ *   node figure-stale.mjs --init --manifest FILE --repo DIR --docs GLOB ... [--image-base DIR]   (그림 참조에서 매니페스트 뼈대 생성·병합)
  *
  * 매니페스트(JSON): 배열 `[{ id, file, route, role, seed, sources[], capturedCommit, note }]` 이거나
  *   `{ figures: [...], globalWatch: [경로...] }`. 기준 키는 그림 파일 경로(file)이다(id·file 중복은 오류).
@@ -24,7 +25,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { listFiles, matchFiles, maskMarkdown } from "./doc-lint.mjs";
+import { listFiles, matchFiles, maskMarkdown, toolHeader } from "./doc-lint.mjs";
 
 const posix = (p) => String(p).split(String.fromCharCode(92)).join("/").replace(/^\.\//, "");
 const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -47,6 +48,15 @@ export function parseManifest(raw) {
   if (figs === null) throw new Error("매니페스트 오류: 배열이거나 figures 배열을 가진 객체여야 한다.");
   const watch = isObj(raw) && Array.isArray(raw.globalWatch) ? raw.globalWatch : [];
   if (!watch.every((w) => typeof w === "string" && w !== "")) throw new Error("매니페스트 오류: globalWatch 는 경로 문자열 배열이어야 한다.");
+  // 화면 단위 소스 그룹: { screens: { 화면이름: [소스 경로...] } } + 그림의 screen 키 — 여러 그림이 같은 화면 소스를 함께 참조한다.
+  const screens = {};
+  if (isObj(raw) && raw.screens !== undefined) {
+    if (!isObj(raw.screens)) throw new Error("매니페스트 오류: screens 는 { 이름: [소스 경로...] } 객체여야 한다.");
+    for (const [k, v] of Object.entries(raw.screens)) {
+      if (!Array.isArray(v) || !v.every((s) => typeof s === "string" && s !== "")) throw new Error(`매니페스트 오류: screens.${k} 는 경로 문자열 배열이어야 한다.`);
+      screens[k] = v.map(posix);
+    }
+  }
   const ids = new Set();
   const files = new Set();
   const figures = figs.map((x, i) => {
@@ -56,8 +66,18 @@ export function parseManifest(raw) {
     if (files.has(file)) throw new Error(`매니페스트 오류: 그림 파일 경로 중복 ${file}`);
     ids.add(x.id);
     files.add(file);
-    const sources = Array.isArray(x.sources) && x.sources.every((s) => typeof s === "string" && s !== "") ? x.sources.map(posix) : null;
-    return { id: x.id, file, sources, capturedCommit: typeof x.capturedCommit === "string" ? x.capturedCommit.trim() : "" };
+    const own = Array.isArray(x.sources) && x.sources.every((s) => typeof s === "string" && s !== "") ? x.sources.map(posix) : [];
+    const screen = typeof x.screen === "string" && x.screen !== "" ? x.screen : null;
+    const group = screen !== null ? screens[screen] : undefined;
+    const merged = [...new Set([...own, ...(group ?? [])])];
+    return {
+      id: x.id,
+      file,
+      sources: merged.length > 0 ? merged : null,
+      screen,
+      badScreen: screen !== null && group === undefined,
+      capturedCommit: typeof x.capturedCommit === "string" ? x.capturedCommit.trim() : "",
+    };
   });
   const imageBase = isObj(raw) && typeof raw.imageBase === "string" && raw.imageBase !== "" ? trimSlash(posix(raw.imageBase)) : null;
   return { figures, globalWatch: watch.map(posix), imageBase };
@@ -72,7 +92,10 @@ export function collectRefs(repo, docGlobs, imageBase = null) {
     const text = readFileSync(path.join(repo, doc), "utf8");
     const lines = maskMarkdown(text, { keepLinks: true }).split("\n");
     const dir = imageBase !== null ? imageBase : path.posix.dirname(doc);
+    let heading = "";
     lines.forEach((line, i) => {
+      const h = /^ {0,3}(#{1,2})[ \t]+(.+?)[ \t#]*$/.exec(line);
+      if (h) heading = h[2].trim();
       const found = [...line.matchAll(/!\[[^\]]*\]\(\s*<?([^)\s>]+)/g)].map((m) => m[1]);
       found.push(...[...line.matchAll(/<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']/gi)].map((m) => m[1]));
       for (let src of found) {
@@ -84,7 +107,7 @@ export function collectRefs(repo, docGlobs, imageBase = null) {
           /* 그대로 쓴다 */
         }
         const rel = src.startsWith("/") ? src.slice(1) : path.posix.normalize(path.posix.join(dir, src));
-        refs.push({ doc, line: i + 1, path: rel });
+        refs.push({ doc, line: i + 1, path: rel, heading });
       }
     });
   }
@@ -106,6 +129,7 @@ export function checkFigures({ manifest, repo, docs = [], unregistered = false, 
     const why = [];
     if (f.capturedCommit === "") why.push("capturedCommit 없음");
     else if (!gitOk(repo, ["cat-file", "-e", `${f.capturedCommit}^{commit}`])) why.push(`capturedCommit ${f.capturedCommit} 을 저장소에서 찾을 수 없음`);
+    if (f.badScreen) why.push(`screen 정의 없음: ${f.screen}`);
     if (f.sources === null || f.sources.length === 0) why.push("sources 없음");
     else {
       const gone = f.sources.filter((s) => !existsSync(path.join(repo, s)));
@@ -168,10 +192,43 @@ export function formatReport(res) {
   return out;
 }
 
-const USAGE = "사용법: figure-stale --manifest 매니페스트.json --repo 저장소 [--images-stale 출력파일 [--stale-paths]] [--docs GLOB ... --unregistered [--image-base 디렉터리]] [--global-watch 경로 ...] [--exit-zero]";
+/**
+ * 매니페스트 뼈대 생성(--init): 문서의 그림 참조에서 항목을 만든다. 기존 항목은 그대로 두고(파일 경로 기준) 없는 그림만 덧붙인다.
+ * 새 항목: id = 그림 파일 이름(중복이면 -2, -3…), file, route·role·seed = "", screen = "", sources = [],
+ *   capturedCommit = 그림 파일의 마지막 커밋(없으면 ""), note = 참조한 장(앞쪽 가장 가까운 # · ## 제목, 없으면 문서 이름).
+ * 매니페스트에 screens·globalWatch·imageBase 가 있으면 그대로 보존한다. 반환: { manifest(쓸 객체/배열), added, kept }.
+ */
+export function buildInit({ repo, docs, imageBase = null, existingRaw = null }) {
+  const existing = existingRaw === null ? { figures: [] } : existingRaw;
+  const keptList = Array.isArray(existing) ? existing : isObj(existing) && Array.isArray(existing.figures) ? existing.figures : null;
+  if (keptList === null) throw new Error("매니페스트 오류: 배열이거나 figures 배열을 가진 객체여야 한다.");
+  const base = imageBase !== null ? trimSlash(posix(imageBase)) : isObj(existing) && typeof existing.imageBase === "string" && existing.imageBase !== "" ? trimSlash(posix(existing.imageBase)) : null;
+  const files = new Set(keptList.filter((x) => isObj(x) && typeof x.file === "string").map((x) => posix(x.file)));
+  const ids = new Set(keptList.filter((x) => isObj(x) && typeof x.id === "string").map((x) => x.id));
+  const added = [];
+  for (const r of collectRefs(repo, docs, base)) {
+    if (files.has(r.path)) continue;
+    files.add(r.path);
+    const stem = path.posix.basename(r.path).replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9가-힣._-]+/g, "-") || "figure";
+    let id = stem;
+    for (let n = 2; ids.has(id); n++) id = `${stem}-${n}`;
+    ids.add(id);
+    let commit = "";
+    try {
+      commit = git(repo, ["log", "-1", "--format=%H", "--", r.path]).trim();
+    } catch {
+      /* 저장소에 없는 그림은 빈 값 */
+    }
+    added.push({ id, file: r.path, route: "", role: "", seed: "", screen: "", sources: [], capturedCommit: commit, note: r.heading !== "" ? r.heading : path.posix.basename(r.doc) });
+  }
+  const figures = [...keptList, ...added];
+  return { manifest: Array.isArray(existing) ? figures : { ...existing, figures }, added: added.length, kept: keptList.length };
+}
+
+const USAGE = "사용법: figure-stale --manifest 매니페스트.json --repo 저장소 [--images-stale 출력파일 [--stale-paths]] [--docs GLOB ... --unregistered [--image-base 디렉터리]] [--global-watch 경로 ...] [--exit-zero]  |  --init --manifest 파일 --repo 저장소 --docs GLOB ... [--image-base 디렉터리]";
 
 export function parseArgs(argv) {
-  const o = { manifest: null, repo: null, imagesStale: null, stalePaths: false, docs: [], unregistered: false, globalWatch: [], imageBase: null, exitZero: false };
+  const o = { manifest: null, repo: null, imagesStale: null, stalePaths: false, docs: [], unregistered: false, globalWatch: [], imageBase: null, init: false, exitZero: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--manifest") o.manifest = argv[++i];
@@ -183,10 +240,11 @@ export function parseArgs(argv) {
     else if (a === "--image-base") o.imageBase = argv[++i];
     else if (a === "--global-watch") o.globalWatch.push(argv[++i]);
     else if (a === "--exit-zero") o.exitZero = true;
+    else if (a === "--init") o.init = true;
     else throw new Error(`알 수 없는 인자: ${a}\n${USAGE}`);
   }
   if (!o.manifest || !o.repo) throw new Error(USAGE);
-  if (o.unregistered && o.docs.length === 0) throw new Error(`--unregistered 는 --docs 가 필요하다.\n${USAGE}`);
+  if ((o.unregistered || o.init) && o.docs.length === 0) throw new Error(`--unregistered·--init 은 --docs 가 필요하다.\n${USAGE}`);
   return o;
 }
 
@@ -195,8 +253,21 @@ export function run(argv, io = {}) {
   const err = io.err ?? ((s) => process.stderr.write(`${s}\n`));
   try {
     const o = parseArgs(argv);
-    const raw = JSON.parse(readFileSync(path.resolve(o.manifest), "utf8").replace(/^﻿/, ""));
     const repo = path.resolve(o.repo);
+    const manifestPath = path.resolve(o.manifest);
+    const manifestExists = existsSync(manifestPath);
+    const rawText = manifestExists ? readFileSync(manifestPath, "utf8").replace(/^﻿/, "") : "";
+    if (o.init) {
+      // 매니페스트가 없으면 새로 만들고, 있으면 기존 항목을 보존한 채 없는 그림만 덧붙인다(이 모드만 파일을 쓴다).
+      const r = buildInit({ repo, docs: o.docs, imageBase: o.imageBase, existingRaw: manifestExists ? JSON.parse(rawText) : null });
+      writeFileSync(manifestPath, `${JSON.stringify(r.manifest, null, 2)}\n`, "utf8");
+      out(toolHeader("figure-stale", rawText));
+      out(`figure-stale --init: 새로 추가 ${r.added}건, 기존 보존 ${r.kept}건 → ${o.manifest}`);
+      return 0;
+    }
+    if (!manifestExists) throw new Error(`매니페스트를 찾을 수 없다: ${o.manifest}`);
+    const raw = JSON.parse(rawText);
+    out(toolHeader("figure-stale", rawText));
     const res = checkFigures({ manifest: parseManifest(raw), repo, docs: o.docs, unregistered: o.unregistered, globalWatch: o.globalWatch, imageBase: o.imageBase });
     for (const l of formatReport(res)) out(l);
     if (o.imagesStale !== null) {
