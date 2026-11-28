@@ -10,6 +10,7 @@ import {
   detectPlate,
   detectResidentId,
   detectSecretLike,
+  numberIdCueBefore,
   type Candidate,
 } from "./detectors";
 import { normalizeText } from "./normalize";
@@ -362,7 +363,7 @@ function collect(text: string, c: Compiled): Candidate[] {
 
 const STRENGTH: Readonly<Record<string, number>> = { OFF: -1, PASS: 0, MASK: 1, BLOCK: 2 };
 
-function classify(cands: Candidate[], c: Compiled): Group[] {
+function classify(cands: Candidate[], c: Compiled, text: string): Group[] {
   // 번호류 후보가 더 강한 번호(주민·카드·전화·이메일) 안에 완전히 들어 있으면 버린다(같은 번호의 이중 해석).
   const strong = cands.filter((x) => x.kind === "RESIDENT_ID" || x.kind === "CARD" || x.kind === "PHONE" || x.kind === "EMAIL");
   const biz = cands.filter((x) => x.kind === "BIZNO"); // 검증식을 통과한 사업자번호 모양은 계좌로 다시 해석하지 않는다
@@ -371,6 +372,7 @@ function classify(cands: Candidate[], c: Compiled): Group[] {
       if (strong.some((s) => s.start <= x.start && x.end <= s.end)) return false;
     }
     if (x.kind === "ACCOUNT" && biz.some((s) => s.start <= x.start && x.end <= s.end)) return false;
+    if (x.kind === "ACCOUNT" && numberIdCueBefore(text, x.start, x.end)) return false; // rules/4: 주문·송장 단서 뒤 구분 없는 숫자
     return true;
   });
   kept.sort((a, b) => a.start - b.start || b.end - a.end);
@@ -438,7 +440,7 @@ function processText(raw: string, c: Compiled, st: State): string {
   const cues = countAddressCues(text); // 주소는 가리지 않고 단서어 경고만(보강 ①)
   if (cues > 0) st.warnings.ADDRESS_CUE = (st.warnings.ADDRESS_CUE ?? 0) + cues;
 
-  const groups = classify(collect(text, c), c);
+  const groups = classify(collect(text, c), c, text);
   const blocked = new Set<GuardKind>();
   const masks: Group[] = [];
   for (const g of groups) {
@@ -484,7 +486,7 @@ function processText(raw: string, c: Compiled, st: State): string {
 function postCheck(masked: string, c: Compiled): void {
   const ranges = tokenRanges(masked);
   const residual = new Set<GuardKind>();
-  for (const g of classify(collect(masked, c), c)) {
+  for (const g of classify(collect(masked, c), c, masked)) {
     if (ranges.some(([a, b]) => a <= g.start && g.end <= b)) continue;
     if (effectiveMode(g, c) !== "PASS") residual.add(g.kind);
   }
