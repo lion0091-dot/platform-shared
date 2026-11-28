@@ -1,0 +1,50 @@
+{
+  "include": ["docs/**/*.md"],
+  "exclude": ["docs/archive/**"],
+  "rules": {
+    "nounJul": {
+      "allow": ["줄이", "줄어", "줄인", "줄입", "줄다", "줄지", "줄면", "줄도", "돌려줄", "건네줄", "알려줄", "보내줄", "나눠줄", "챙겨줄", "보여 줄", { "regex": "줄\\s+금액" }],
+      "screenLabels": [{ "files": ["docs/screens/**"], "text": "3줄 요약", "match": "prefix" }]
+    },
+    "english": {
+      "skipQuoted": true,
+      "skipForbiddenMatches": true,
+      "minLength": 2,
+      "allowWords": ["api", "url", "pdf", "csv", "id", "sql", "ok"],
+      "allowPatterns": ["^[0-9a-f]{7,40}$", "^v?\\d+(\\.\\d+)+(-[A-Za-z0-9.]+)?$", "^[\\w./-]+\\.(md|ts|tsx|js|mjs|json|sql|png|pdf)$", "/"],
+      "screenLabels": [{ "file": "docs/**", "text": "Sign in" }, { "files": ["docs/screens/**"], "text": "Order #", "match": "prefix" }]
+    },
+    "forbidden": {
+      "patterns": [
+        { "id": "todo", "regex": "TODO|FIXME", "message": "미완성 표시" },
+        { "id": "process-unable", "regex": "확인하지 못|확인 못", "message": "과정 서술: 확인하지 못한 내용은 본문에 쓰지 않는다" },
+        { "id": "process-code-read", "regex": "코드 판독|코드만 읽", "message": "과정 서술: 어떻게 알아냈는지는 본문에 쓰지 않는다" },
+        { "id": "process-local", "regex": "로컬에서 확인", "message": "과정 서술: 확인 환경은 본문에 쓰지 않는다" },
+        { "id": "process-press", "regex": "눌러", "message": "과정 서술 의심(예: 눌러 보니). 안내문의 «눌러 주세요» 는 오탐이면 정규식을 좁힌다" },
+        { "id": "process-time", "regex": "작성 시점|검수 때", "message": "과정 서술: 작성·검수 경위는 본문에 쓰지 않는다" }
+      ]
+    },
+    "sameBlock": {
+      "groups": [
+        {
+          "id": "shared-text",
+          "files": ["docs/manual/*.md"],
+          "start": "<!-- BEGIN SHARED-TEXT -->",
+          "end": "<!-- END SHARED-TEXT -->",
+          "includeStart": false,
+          "includeEnd": false,
+          "canonical": "C:/path/outside/repo/shared-text.txt",
+          "mode": "auto",
+          "normalize": { "ignoreNumbering": true, "collapseWhitespace": true, "stripQuote": true, "stripEmphasis": true }
+        },
+        {
+          "id": "tail-block",
+          "files": ["docs/notice/*.md"],
+          "start": { "regex": "^## 유의 사항" },
+          "end": "EOF"
+        }
+      ]
+    },
+    "emphasis": { "enabled": false, "emoji": true, "maxBoldPerLine": 3 }
+  }
+}

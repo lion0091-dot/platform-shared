@@ -1,0 +1,20 @@
+{
+  "imageBase": "docs",
+  "globalWatch": ["lib/i18n/labels.ts"],
+  "screens": {
+    "orders": ["app/orders/page.tsx", "components/OrderTable.tsx"]
+  },
+  "figures": [
+    {
+      "id": "orders-list",
+      "file": "docs/images/orders-list.png",
+      "route": "/orders",
+      "role": "manager",
+      "seed": "scripts/seed-demo.sql",
+      "screen": "orders",
+      "sources": [],
+      "capturedCommit": "0123abc",
+      "note": "1장 주문 목록(필터 없는 기본 상태)"
+    }
+  ]
+}
