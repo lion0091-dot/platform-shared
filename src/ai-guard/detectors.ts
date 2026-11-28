@@ -71,6 +71,17 @@ function chainBoundary(text: string, start: number, end: number): boolean {
   return true;
 }
 
+/**
+ * 주문·송장류 단서(rules/4). 이 단서 «바로 뒤»의 구분 없는 긴 숫자는 계좌로 보지 않는다(guard.ts).
+ * 자유 문장 저장 모듈의 DEFAULT_NUMBER_CUE_EXEMPTIONS 와 같은 원칙: 하이픈 덩어리·카드(Luhn)·주민·전화·사업자번호는 면제하지 않는다.
+ */
+export const DEFAULT_NUMBER_ID_CUES: readonly string[] = ["주문번호", "운송장번호", "운송장", "송장번호", "송장", "접수번호", "배차번호", "관리번호", "문서번호", "추적번호", "발주번호", "바코드", "상품코드", "택배"];
+const NUMBER_ID_CUE_RE = new RegExp(`(?:${[...DEFAULT_NUMBER_ID_CUES].sort((a, b) => b.length - a.length).join("|")}) {0,2}[:#]? {0,2}$`);
+/** 구분 없는 숫자 스팬이 주문·송장류 단서 바로 뒤에 있으면 true. */
+export function numberIdCueBefore(text: string, start: number, end: number): boolean {
+  return /^\d+$/.test(text.slice(start, end)) && NUMBER_ID_CUE_RE.test(text.slice(Math.max(0, start - 14), start));
+}
+
 // ── 체크섬·형식 ────────────────────────────────────────────────
 export function luhnValid(digits: string): boolean {
   if (digits.length < 13 || digits.length > 19) return false;
@@ -131,19 +142,34 @@ function plainNumberExcluded(text: string, start: number, end: number, run: stri
 }
 
 // ── 패턴 ───────────────────────────────────────────────────────
-const RRN_RE = /\d{6} {0,2}[-~]? {0,2}[1-8]\d{6}/g;
-const EMAIL_RE = /[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){1,5}/g;
-const CARD_GROUPED_RE = /\d{4}[- ]\d{4}[- ]\d{4}[- ]\d{3,4}/g;
-const CARD_AMEX_RE = /\d{4}[- ]\d{6}[- ]\d{5}/g;
+/** 숫자 묶음 사이 구분자(rules/4): 하이픈·점(양옆 공백 2칸까지) 또는 공백 한 칸. */
+const SEP = "(?: {0,2}[-.] {0,2}| )";
+const RRN_RE = /\d{6} {0,2}[-~.]? {0,2}[1-8]\d{6}/g;
+const EMAIL_RE = /[A-Za-z0-9._%+-]{1,64} {0,2}@ {0,2}[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){1,5}/g;
+/** 이메일 우회 표기(rules/4): `a(at)b.com`·`a [at] b.com`·`a at b dot com`·`a 골뱅이 b.com`. 끝은 영문 최상위 도메인이어야 한다(`at 3.5` 같은 영문 문장 오탐 방지). */
+const E_LOCAL = "[A-Za-z0-9._%+-]{1,64}";
+const E_LABEL = "[A-Za-z0-9-]{1,63}";
+const E_DOT = String.raw`(?:\.| {0,2}[([{] {0,2}(?:dot|DOT|Dot) {0,2}[)\]}] {0,2}| (?:dot|DOT|Dot) )`;
+const E_TAIL = String.raw`(?:${E_DOT}${E_LABEL}){0,4}${E_DOT}[A-Za-z]{2,10}(?![A-Za-z0-9-])`;
+const EMAIL_OBF_RES: readonly RegExp[] = [
+  new RegExp(String.raw`${E_LOCAL} {0,2}(?:[([{] {0,2}(?:at|AT|At) {0,2}[)\]}]|골뱅이) {0,2}${E_LABEL}${E_TAIL}`, "g"),
+  new RegExp(String.raw`${E_LOCAL} (?:at|AT|At) ${E_LABEL}${E_TAIL}`, "g"),
+];
+const CARD_GROUPED_RE = new RegExp(String.raw`\d{4}${SEP}\d{4}${SEP}\d{4}${SEP}\d{3,4}`, "g");
+const CARD_AMEX_RE = new RegExp(String.raw`\d{4}${SEP}\d{6}${SEP}\d{5}`, "g");
 const RUN_RE = /\d+/g;
-const PHONE_INTL_RE = /\+82[-. ]?\(?0?\d{1,2}\)?[-. ]?\d{3,4}[-. ]?\d{4}/g;
-const PHONE_82_RE = /82[-. ]?0?1\d[-. ]?\d{3,4}[-. ]?\d{4}/g;
-const PHONE_DOMESTIC_RE = /\(?0(?:1[016789]|2|[3-6][1-5]|70|80|50\d?|60)\)?[-. ]?\d{3,4}[-. ]?\d{4}/g;
+const PSEP = `${SEP}?`;
+const PHONE_INTL_RE = new RegExp(String.raw`\+82${PSEP}\(?0?\d{1,2}\)?${PSEP}\d{3,4}${PSEP}\d{4}`, "g");
+const PHONE_82_RE = new RegExp(String.raw`82${PSEP}0?1\d${PSEP}\d{3,4}${PSEP}\d{4}`, "g");
+const PHONE_DOMESTIC_RE = new RegExp(String.raw`\(?0(?:1[016789]|2|[3-6][1-5]|70|80|50\d?|60)\)?${PSEP}\d{3,4}${PSEP}\d{4}`, "g");
 const PHONE_REP_RE = /1[5-9]\d{2}[-. ]?\d{4}/g;
 const REP_CUE_RE = /(?:전화|대표|문의|연락|상담|고객센터|콜센터|tel|TEL|Tel|☎) {0,2}(?:번호)? {0,2}:? {0,2}$/;
-const BIZNO_RE = /\d{3}[- ]?\d{2}[- ]?\d{5}/g;
-const ACCOUNT_CHAIN_RE = /\d{2,6}(?:-\d{2,8}){1,3}/g;
-const PLATE_RE = /\d{2,3} ?[가나다라마바사아자하허호거너더러머버서어저고노도로모보소오조구누두루무부수우주배] ?\d{4}/g;
+const BIZNO_RE = new RegExp(String.raw`\d{3}${PSEP}\d{2}${PSEP}\d{5}`, "g");
+const ACCOUNT_CHAIN_RE = /\d{2,6}(?: {0,2}- {0,2}\d{2,8}){1,3}/g;
+/** 공백으로만 끊은 계좌(rules/4): 3묶음 이상·첫 묶음 3자리 이상·4자리 이상 묶음 하나 이상, 합계 10~14자리일 때만(수량 나열 오탐을 줄이려 좁게). */
+const ACCOUNT_SPACED_RE = /\d{3,6}(?: \d{2,8}){2,3}/g;
+/** 차량번호(rules/4): 앞 지역명 흡수, 글자 양옆 공백 2칸·뒤 하이픈 허용. */
+const PLATE_RE = /(?:(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주) {0,2})?\d{2,3} {0,2}[가나다라마바사아자하허호거너더러머버서어저고노도로모보소오조구누두루무부수우주배] {0,2}-? {0,2}\d{4}/g;
 
 const SECRET_RES: readonly RegExp[] = [
   /sk-[A-Za-z0-9_-]{20,}/g,
@@ -171,7 +197,9 @@ export function detectResidentId(text: string, out: Candidate[]): void {
 }
 
 export function detectEmail(text: string, out: Candidate[]): void {
-  for (const m of matches(EMAIL_RE, text)) out.push({ kind: "EMAIL", start: m.index, end: m.index + m[0].length, suspect: false });
+  for (const re of [EMAIL_RE, ...EMAIL_OBF_RES]) {
+    for (const m of matches(re, text)) out.push({ kind: "EMAIL", start: m.index, end: m.index + m[0].length, suspect: false });
+  }
 }
 
 export function detectCard(text: string, out: Candidate[]): void {
@@ -228,8 +256,20 @@ export function detectAccountAndRuns(text: string, out: Candidate[]): void {
       if (!chainBoundary(text, s, e)) return false;
       const chunks = m[0].split("-").length;
       const n = digitsOf(m[0]).length;
-      if (ISO_DATE.test(m[0])) return false;
+      if (ISO_DATE.test(m[0].replace(/ /g, ""))) return false;
       return (n >= 10 && n <= 16) || (n === 9 && chunks >= 3);
+    },
+    out,
+    (_m, s, e) => ({ kind: "ACCOUNT", start: s, end: e, suspect: false }),
+  );
+  scan(
+    ACCOUNT_SPACED_RE,
+    text,
+    (m, s, e) => {
+      if (!chainBoundary(text, s, e)) return false;
+      const n = digitsOf(m[0]).length;
+      if (!m[0].split(" ").some((g) => g.length >= 4)) return false; // 3자리 묶음만 나열된 수량·코드는 제외
+      return n >= 10 && n <= 14;
     },
     out,
     (_m, s, e) => ({ kind: "ACCOUNT", start: s, end: e, suspect: false }),

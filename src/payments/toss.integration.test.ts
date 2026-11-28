@@ -44,19 +44,20 @@ const T = 120_000;
 const RETRY_LATER_MAX = 3;
 const RETRY_LATER_WAIT_MS = 2_000;
 
-/** 마지막 토스 오류 응답 코드(시험이 "어떤 코드 때문에 그 분류가 됐는지" 확인하는 용도) */
-let lastErrorCode: string | null = null;
+/**
+ * 받은 토스 오류 응답 코드 목록(시험이 "어떤 코드 때문에 그 분류가 됐는지" 확인하는 용도). 시험 시작 때 비운다.
+ * "마지막 코드" 하나만 두면 클라이언트가 오류 뒤에 하는 확인 조회(200)가 덮어써 null 이 된다(2026-11-26 실측) → 목록으로 쌓는다.
+ */
+const errorCodes: string[] = [];
 const recordingFetch: typeof fetch = async (input, init) => {
   const res = await fetch(input, init);
-
-  lastErrorCode = null;
 
   if (!res.ok) {
     try {
       const b = (await res.clone().json()) as { code?: unknown };
-      lastErrorCode = typeof b.code === "string" ? b.code : `HTTP_${res.status}`;
+      errorCodes.push(typeof b.code === "string" ? b.code : `HTTP_${res.status}`);
     } catch {
-      lastErrorCode = `HTTP_${res.status}`;
+      errorCodes.push(`HTTP_${res.status}`);
     }
   }
 
@@ -146,10 +147,13 @@ describe.skipIf(!HAS_PAYMENT)("토스 테스트 환경 — 결제창 결제 1건
     if (r.kind === "success" && firstConfirm) expect({ approvedAt: r.payment.approvedAt, totalAmount: r.payment.totalAmount, status: r.payment.status }).toEqual({ approvedAt: firstConfirm.approvedAt, totalAmount: firstConfirm.totalAmount, status: firstConfirm.status });
   });
 
-  it("다른 멱등키로 다시 승인 → success (토스는 200 DONE 을 그대로 돌려줌, 2026-10-16 실측)", { timeout: T }, async () => {
+  // 토스 동작이 실측마다 다르다: 2026-10-16 은 200 DONE, 2026-11-26 은 ALREADY_PROCESSED_PAYMENT 오류(→ already_done, 호출자가 조회로 확정).
+  // 어느 쪽이든 이중 승인은 아니므로 둘 다 허용한다.
+  it("다른 멱등키로 다시 승인 → success(DONE) 또는 already_done(ALREADY_PROCESSED_PAYMENT)", { timeout: T }, async () => {
     const r = await toss.confirm({ paymentKey: PAYMENT_KEY, orderId: ORDER_ID, amount: AMOUNT, idempotencyKey: `${confirmIdempotencyKey(ORDER_ID, PAYMENT_KEY)}_2` });
 
-    expect(r, JSON.stringify(r)).toMatchObject({ kind: "success", payment: { status: "DONE" } });
+    if (r.kind === "already_done") expect(r, JSON.stringify(r)).toMatchObject({ kind: "already_done", code: "ALREADY_PROCESSED_PAYMENT" });
+    else expect(r, JSON.stringify(r)).toMatchObject({ kind: "success", payment: { status: "DONE" } });
   });
 
   it("주문번호 조회 → found, interpretPayment = paid", { timeout: T }, async () => {
@@ -206,11 +210,15 @@ describe.skipIf(!HAS_PAYMENT)("토스 테스트 환경 — 결제창 결제 1건
   });
 
   it("다른 키로 전액 취소 한 번 더 → 토스가 ALREADY_CANCELED_PAYMENT 를 돌려주고, 조회로 확인해 canceled(alreadyCanceled)", { timeout: T }, async () => {
+    errorCodes.length = 0;
     const r = await cancel({ paymentKey: PAYMENT_KEY, cancelReason: "통합 시험 중복취소", idempotencyKey: `${cancelIdempotencyKey({ paymentKey: PAYMENT_KEY })}_2` });
 
     expect(r, JSON.stringify(r)).toMatchObject({ kind: "canceled", alreadyCanceled: true });
-    // alreadyCanceled 는 NOT_CANCELABLE_AMOUNT 경로로도 나온다 → 실제로 받은 토스 코드를 확인한다(다르면 코드가 메시지에 찍힌다).
-    expect(["ALREADY_CANCELED_PAYMENT", "ALREADY_REFUND_PAYMENT"], `토스 응답 코드: ${lastErrorCode}`).toContain(lastErrorCode);
+    // alreadyCanceled 는 NOT_CANCELABLE_AMOUNT 경로로도 나온다 → 이 시험 동안 실제로 받은 토스 코드를 확인한다(다르면 목록이 메시지에 찍힌다).
+    // 클라이언트는 취소 오류 뒤 확인 조회(200)를 하므로 "마지막 코드"가 아니라 받은 코드 목록으로 본다.
+    const codes = JSON.stringify(errorCodes);
+    expect(errorCodes.some((c) => c === "ALREADY_CANCELED_PAYMENT" || c === "ALREADY_REFUND_PAYMENT"), `토스 응답 코드: ${codes}`).toBe(true);
+    expect(errorCodes, `토스 응답 코드: ${codes}`).not.toContain("NOT_CANCELABLE_AMOUNT");
   });
 
   it("최종 조회 → 잔액 0, interpretPayment = canceled", { timeout: T }, async () => {
