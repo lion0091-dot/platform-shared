@@ -2,6 +2,12 @@
 
 `@platform/shared/payments`·`@platform/shared/secrets` 의 변경 이력. 형식은 단순 목록이며, 소비 앱 전환 안내는 `docs/payments-api-draft.md` §9.
 
+## v0.4.0-rc.15 — package.json BOM 제거 (표기 정정)
+
+rc.13·rc.14 의 `package.json` 이 UTF-8 BOM(EF BB BF)으로 시작해, 쓰는 앱의 번들러(webpack)가 이 파일을 JSON 으로 읽지 못하고 빌드가 깨졌다. 코드·export·동작은 rc.14 와 같다(BOM 만 제거). rc.13·rc.14 태그는 옮기지 않는다 → **rc.13·rc.14 대신 rc.15 를 핀으로 쓴다.**
+- `package.json` 맨 앞 BOM 제거, 버전 0.4.0-rc.15.
+- 재발 방지 시험 `src/json-bom.test.ts`: 저장소의 모든 `.json` 파일이 BOM 없이 시작하고 그대로 `JSON.parse` 되는지 확인.
+
 ## v0.4.0-rc.14 — ai-guard 규칙 /4: 가림 범위 확대·주문/송장 단서
 
 ai-guard 만 바뀐다(기존 export·시그니처 불변, `DEFAULT_NUMBER_ID_CUES` 추가). **동작 변경**: 가림이 늘어나는 쪽(①~③)과 줄어드는 쪽(④)이 함께 있다. 규칙 버전 `ai-guard-rules/4`. 감지기를 함께 쓰는 자유 문장 모듈(free-text)도 ①의 점·공백 구분 번호를 더 가린다. 핀 승격은 각 앱 담당이 태그 뒤에 한다.
